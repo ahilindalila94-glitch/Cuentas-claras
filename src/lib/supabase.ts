@@ -101,6 +101,14 @@ export const syncExtractos = async (): Promise<{ success: number; failed: number
 export const supabase = {
   auth: {
     getSession: async () => {
+      if (!isSupabaseConfigured()) {
+        const localUserStr = localStorage.getItem('local_supabase_session');
+        if (localUserStr) {
+          const localUser = JSON.parse(localUserStr);
+          return { data: { session: { user: localUser } }, error: null };
+        }
+        return { data: { session: null }, error: null };
+      }
       try {
         const { data, error } = await realClient.auth.getSession();
         if (error) {
@@ -169,6 +177,18 @@ export const supabase = {
     },
     
     signUp: async ({ email, password, options }: any) => {
+      if (!isSupabaseConfigured()) {
+        const localUser = {
+          id: 'local-user-' + btoa(email),
+          email,
+          isLocalSession: true,
+          created_at: new Date().toISOString(),
+          user_metadata: options?.data || {}
+        };
+        localStorage.setItem('local_supabase_session', JSON.stringify(localUser));
+        triggerAuthListeners('SIGNED_IN', localUser);
+        return { data: { user: localUser, session: { user: localUser } }, error: null, isLocalSession: true };
+      }
       try {
         const { data, error } = await realClient.auth.signUp({ email, password, options });
         if (error) {
@@ -194,6 +214,20 @@ export const supabase = {
     },
     
     signInWithPassword: async ({ email, password }: any) => {
+      if (!isSupabaseConfigured()) {
+        const userMetaStr = localStorage.getItem(`meta_${email}`);
+        const userMeta = userMetaStr ? JSON.parse(userMetaStr) : {};
+        const localUser = {
+          id: 'local-user-' + btoa(email),
+          email,
+          isLocalSession: true,
+          created_at: new Date().toISOString(),
+          user_metadata: userMeta
+        };
+        localStorage.setItem('local_supabase_session', JSON.stringify(localUser));
+        triggerAuthListeners('SIGNED_IN', localUser);
+        return { data: { user: localUser, session: { user: localUser } }, error: null, isLocalSession: true };
+      }
       try {
         const { data, error } = await realClient.auth.signInWithPassword({ email, password });
         if (error) {
