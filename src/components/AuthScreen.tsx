@@ -44,8 +44,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         });
         if (signUpErr) throw signUpErr;
         
-        setSuccessMsg(`¡Registro exitoso como ${finalRole === 'admin_contadora' ? 'Contadora' : 'Cliente'}! Intenta iniciar sesión con tus credenciales.`);
-        setIsSignUp(false);
+        if (data?.user) {
+          const userWithRole = {
+            ...data.user,
+            role: email.trim().toLowerCase() === 'ahilindalila94@gmail.com' 
+              ? 'admin_contadora' 
+              : (data.user.user_metadata?.role || finalRole)
+          };
+          setSuccessMsg(`¡Registro exitoso! Iniciando sesión automáticamente...`);
+          setTimeout(() => {
+            onAuthSuccess(userWithRole);
+          }, 1500);
+        } else {
+          setSuccessMsg(`¡Registro exitoso como ${finalRole === 'admin_contadora' ? 'Contadora' : 'Cliente'}!`);
+          setIsSignUp(false);
+        }
       } else {
         const { data, error: signInErr } = await supabase.auth.signInWithPassword({
           email: email.trim(),
@@ -117,17 +130,53 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
   };
 
   return (
-    <div className="max-w-md w-full mx-auto my-12 p-6 sm:p-8 bg-white rounded-3xl border border-slate-200/90 shadow-xl space-y-6">
+    <div className="max-w-md w-full mx-auto my-2 sm:my-8 p-4 sm:p-6 bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-md sm:shadow-xl space-y-4 sm:space-y-5">
       <div className="text-center">
-        <div className="w-24 h-24 rounded-full bg-white flex items-center justify-center mx-auto mb-4 shadow-md border border-slate-100 p-1 overflow-hidden">
-          <Logo size={80} />
+        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-white flex items-center justify-center mx-auto mb-2 shadow-md border border-slate-100 p-1 overflow-hidden">
+          <Logo size={60} />
         </div>
-        <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-          {isSignUp ? 'Crear Cuenta Contable' : 'Cuentas Claras'}
+        <h2 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">
+          Estudio Ahilin Torres
         </h2>
-        <p className="text-xs text-slate-500 mt-1">
-          {isSignUp ? 'Regístrate para conciliar tus movimientos' : 'Estudio Ahilin Torres — Asesoría Contable'}
+        <p className="text-[11px] text-slate-500 mt-0.5">
+          Asesoría Contable & Conciliación
         </p>
+      </div>
+
+      {/* Segmented Tab Selector for Ingresar vs Registrarse */}
+      <div className="grid grid-cols-2 gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200/60">
+        <button
+          type="button"
+          onClick={() => {
+            setIsSignUp(false);
+            setError('');
+            setSuccessMsg('');
+          }}
+          className={`py-2 text-xs font-black rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+            !isSignUp
+              ? 'bg-white text-purple-700 shadow-xs'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <LogIn className="w-3.5 h-3.5" />
+          <span>Ingresar</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setIsSignUp(true);
+            setError('');
+            setSuccessMsg('');
+          }}
+          className={`py-2 text-xs font-black rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+            isSignUp
+              ? 'bg-white text-purple-700 shadow-xs'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <UserPlus className="w-3.5 h-3.5" />
+          <span>Registrarse</span>
+        </button>
       </div>
 
       {error && (
@@ -236,16 +285,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
           )}
         </button>
       </form>
-
-      <div className="pt-2 border-t border-slate-100 text-center">
-        <button
-          type="button"
-          onClick={() => setIsSignUp(!isSignUp)}
-          className="text-xs text-purple-600 hover:text-purple-700 font-bold"
-        >
-          {isSignUp ? '¿Ya tienes una cuenta? Inicia sesión' : '¿No tienes una cuenta? Regístrate'}
-        </button>
-      </div>
 
       {/* Segmented Quick Demo Mode Buttons */}
       <div className="space-y-2 pt-2 border-t border-slate-100">
