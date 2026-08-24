@@ -144,13 +144,39 @@ export const supabase = {
     onAuthStateChange: (callback: (event: string, session: any) => void) => {
       authListeners.push(callback);
       
-      // Let's also register it with real Supabase
+      // Instantly trigger for local session if it exists to avoid waiting
+      const localUserStr = localStorage.getItem('local_supabase_session');
+      if (localUserStr) {
+        try {
+          const localUser = JSON.parse(localUserStr);
+          setTimeout(() => callback('SIGNED_IN', { user: localUser }), 0);
+        } catch (e) {}
+      } else {
+        setTimeout(() => callback('SIGNED_OUT', null), 0);
+      }
+
+      if (!isSupabaseConfigured()) {
+        return {
+          data: {
+            subscription: {
+              unsubscribe: () => {
+                const index = authListeners.indexOf(callback);
+                if (index !== -1) {
+                  authListeners.splice(index, 1);
+                }
+              }
+            }
+          }
+        };
+      }
+      
+      // Let's also register it with real Supabase only when configured
       let realUnsubscribe = () => {};
       try {
         const { data: { subscription } } = realClient.auth.onAuthStateChange((event, session) => {
-          const localUserStr = localStorage.getItem('local_supabase_session');
-          if (localUserStr && !session?.user) {
-            const localUser = JSON.parse(localUserStr);
+          const innerLocalStr = localStorage.getItem('local_supabase_session');
+          if (innerLocalStr && !session?.user) {
+            const localUser = JSON.parse(innerLocalStr);
             callback('SIGNED_IN', { user: localUser });
           } else {
             callback(event, session);
@@ -258,10 +284,12 @@ export const supabase = {
     signOut: async () => {
       localStorage.removeItem('local_supabase_session');
       triggerAuthListeners('SIGNED_OUT', null);
-      try {
-        await realClient.auth.signOut();
-      } catch (e) {
-        console.warn('Error al llamar signOut en cliente real:', e);
+      if (isSupabaseConfigured()) {
+        try {
+          await realClient.auth.signOut();
+        } catch (e) {
+          console.warn('Error al llamar signOut en cliente real:', e);
+        }
       }
       return { error: null };
     }

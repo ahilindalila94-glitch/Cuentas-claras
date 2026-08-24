@@ -509,6 +509,31 @@ export default function App() {
           </div>
         )}
 
+        {/* Unauthenticated User Call-To-Action Banner (Especially for easy mobile access) */}
+        {!user && activeTab !== 'auth' && (
+          <div className="bg-gradient-to-r from-purple-700 via-purple-800 to-indigo-900 text-white rounded-2xl p-4.5 sm:p-6 flex flex-col md:flex-row items-center justify-between gap-4 shadow-lg border border-purple-600/50">
+            <div className="flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left">
+              <div className="w-12 h-12 rounded-2xl bg-white/10 text-white flex items-center justify-center shrink-0 border border-white/10 shadow-inner">
+                <LogIn className="w-6 h-6 text-purple-200 animate-pulse" />
+              </div>
+              <div>
+                <h4 className="text-sm sm:text-base font-black tracking-tight uppercase">¿Quieres guardar tu historial y facturar?</h4>
+                <p className="text-xs text-purple-100 mt-1 max-w-lg font-medium leading-relaxed">
+                  Inicia sesión o regístrate en segundos para que tu contadora <strong>Ahilin Torres</strong> pueda liquidar y facturar tus extractos contables de forma directa.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab('auth')}
+              className="w-full md:w-auto px-6 py-3.5 bg-white hover:bg-purple-50 text-purple-900 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-[0.98]"
+            >
+              <UserCheck className="w-4 h-4 text-purple-700" />
+              <span>Ingresar / Registrarse Aquí</span>
+            </button>
+          </div>
+        )}
+
         {/* Client View Panel - Status Indicator Bar */}
         {!isContadora && activeTab === 'analizador' && (
           <div className={`p-4.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-3xs transition-all ${

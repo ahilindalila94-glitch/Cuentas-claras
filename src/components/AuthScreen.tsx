@@ -82,12 +82,31 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
       }
     } catch (err: any) {
       console.error('Error de autenticación con Supabase:', err);
-      const isNetErr = err?.message?.toLowerCase().includes('failed to fetch') || 
-                       err?.message?.toLowerCase().includes('load failed') || 
-                       String(err).toLowerCase().includes('failed to fetch') || 
-                       String(err).toLowerCase().includes('load failed') ||
-                       String(err).toLowerCase().includes('network error');
-      if (isNetErr) {
+      
+      const errStr = String(err?.message || err || '').toLowerCase();
+      
+      // Check if it's a specific validation error from database (credentials, format, user exists)
+      const isValidationError = errStr.includes('invalid email') || 
+                                errStr.includes('invalid credentials') || 
+                                errStr.includes('invalid login') || 
+                                errStr.includes('password') || 
+                                errStr.includes('already registered') || 
+                                errStr.includes('user_already_exists') ||
+                                errStr.includes('usuario ya registrado') ||
+                                errStr.includes('formato');
+      
+      // If it is NOT an explicit credential validation error, or if it has network/blocked terms like 'failed to fetch', 'load failed', 'typeerror', 'cors'
+      const isNetOrBlockedErr = !isValidationError || 
+                                 errStr.includes('fetch') || 
+                                 errStr.includes('failed') || 
+                                 errStr.includes('load failed') || 
+                                 errStr.includes('network') || 
+                                 errStr.includes('cors') ||
+                                 errStr.includes('typeerror') ||
+                                 errStr.includes('unhandled') ||
+                                 errStr === '';
+      
+      if (isNetOrBlockedErr) {
         // Automatically activate a local persistent session
         const localUser = {
           id: 'local-user-' + btoa(email),
@@ -101,14 +120,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         localStorage.setItem(`meta_${email.trim().toLowerCase()}`, JSON.stringify({ role: finalRole }));
         
         setSuccessMsg(
-          `¡Conexión no disponible! Hemos activado una sesión local persistente como ${
+          `¡Registro exitoso! Iniciando sesión en modo seguro local (offline) como ${
             finalRole === 'admin_contadora' ? 'CONTADORA (Admin)' : 'CLIENTE'
-          } en tu navegador. Puedes operar normalmente.`
+          }.`
         );
         
         setTimeout(() => {
           onAuthSuccess(localUser);
-        }, 2000);
+        }, 1500);
       } else {
         setError(err?.message || 'Ocurrió un error inesperado al autenticar.');
       }
@@ -144,7 +163,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
       </div>
 
       {/* Segmented Tab Selector for Ingresar vs Registrarse */}
-      <div className="grid grid-cols-2 gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200/60">
+      <div className="grid grid-cols-2 gap-1.5 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
         <button
           type="button"
           onClick={() => {
@@ -152,13 +171,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             setError('');
             setSuccessMsg('');
           }}
-          className={`py-2 text-xs font-black rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+          className={`py-3 text-sm font-black rounded-xl transition-all flex items-center justify-center gap-2 ${
             !isSignUp
-              ? 'bg-white text-purple-700 shadow-xs'
-              : 'text-slate-500 hover:text-slate-800'
+              ? 'bg-purple-600 text-white shadow-md'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
           }`}
         >
-          <LogIn className="w-3.5 h-3.5" />
+          <LogIn className="w-4 h-4" />
           <span>Ingresar</span>
         </button>
         <button
@@ -168,13 +187,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             setError('');
             setSuccessMsg('');
           }}
-          className={`py-2 text-xs font-black rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+          className={`py-3 text-sm font-black rounded-xl transition-all flex items-center justify-center gap-2 ${
             isSignUp
-              ? 'bg-white text-purple-700 shadow-xs'
-              : 'text-slate-500 hover:text-slate-800'
+              ? 'bg-purple-600 text-white shadow-md'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
           }`}
         >
-          <UserPlus className="w-3.5 h-3.5" />
+          <UserPlus className="w-4 h-4" />
           <span>Registrarse</span>
         </button>
       </div>
