@@ -846,12 +846,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* ARCA Invoice Upload Modal */}
       {selectedClientForArca && (
         <SubirFacturaArcaModal
+          isOpen={true}
           clientEmail={selectedClientForArca.email}
           clientName={selectedClientForArca.nombre_comercio}
           clientCuit={selectedClientForArca.cuit}
           pendingAmount={selectedClientForArca.pendingAmount}
           onClose={() => setSelectedClientForArca(null)}
           onSave={handleSaveArcaSubmit}
+          onSaveFactura={handleSaveArcaSubmit}
         />
       )}
     </div>

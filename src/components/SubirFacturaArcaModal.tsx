@@ -15,24 +15,27 @@ import { FacturaArca } from '../types';
 import { formatCurrencyARS } from '../utils/formatters';
 
 interface SubirFacturaArcaModalProps {
-  isOpen: boolean;
+  isOpen?: boolean;
   onClose: () => void;
   clientEmail: string;
   clientName?: string;
   clientCuit?: string;
   pendingAmount?: number;
-  onSaveFactura: (facturaData: Partial<FacturaArca>, markItemsAsFacturado?: boolean) => Promise<void>;
+  onSave?: (facturaData: Partial<FacturaArca>, markItemsAsFacturado?: boolean) => Promise<void>;
+  onSaveFactura?: (facturaData: Partial<FacturaArca>, markItemsAsFacturado?: boolean) => Promise<void>;
 }
 
 export const SubirFacturaArcaModal: React.FC<SubirFacturaArcaModalProps> = ({
-  isOpen,
+  isOpen = true,
   onClose,
   clientEmail,
   clientName,
   clientCuit,
   pendingAmount = 0,
+  onSave,
   onSaveFactura,
 }) => {
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [numeroFactura, setNumeroFactura] = useState('');
   const [tipoFactura, setTipoFactura] = useState('Factura C');
   const [periodo, setPeriodo] = useState(() => {
@@ -54,18 +57,25 @@ export const SubirFacturaArcaModal: React.FC<SubirFacturaArcaModalProps> = ({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileDataUrl, setFileDataUrl] = useState<string>('');
   const [fileName, setFileName] = useState<string>('');
+  const [fileSizeText, setFileSizeText] = useState<string>('');
+  const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  if (!isOpen) return null;
+  if (isOpen === false) return null;
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const processFile = (file: File) => {
     setErrorMsg(null);
     setSelectedFile(file);
     setFileName(file.name);
+    
+    // Format file size
+    const sizeKB = Math.round(file.size / 1024);
+    if (sizeKB > 1024) {
+      setFileSizeText(`${(sizeKB / 1024).toFixed(1)} MB`);
+    } else {
+      setFileSizeText(`${sizeKB} KB`);
+    }
 
     // If invoice number is empty, suggest from filename
     if (!numeroFactura) {
@@ -84,6 +94,34 @@ export const SubirFacturaArcaModal: React.FC<SubirFacturaArcaModalProps> = ({
     reader.readAsDataURL(file);
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    processFile(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processFile(file);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!clientEmail) {
@@ -91,17 +129,23 @@ export const SubirFacturaArcaModal: React.FC<SubirFacturaArcaModalProps> = ({
       return;
     }
     if (!fileDataUrl || !fileName) {
-      setErrorMsg('Por favor seleccioná el archivo PDF de la Factura ARCA.');
+      setErrorMsg('Por favor seleccioná o arrastrá el archivo PDF de la Factura ARCA.');
       return;
     }
 
     const finalMonto = parseFloat(montoTotal) || pendingAmount || 0;
+    const saveFn = onSave || onSaveFactura;
+
+    if (!saveFn) {
+      setErrorMsg('No se encontró el manejador de guardado.');
+      return;
+    }
 
     setIsProcessing(true);
     setErrorMsg(null);
 
     try {
-      await onSaveFactura(
+      await saveFn(
         {
           client_email: clientEmail.toLowerCase().trim(),
           numero_factura: numeroFactura || `Factura ARCA - ${periodo}`,
@@ -193,36 +237,85 @@ export const SubirFacturaArcaModal: React.FC<SubirFacturaArcaModalProps> = ({
             <label className="block text-xs font-bold text-slate-700 mb-1.5">
               Archivo PDF de la Factura ARCA *
             </label>
-            <div className="relative border-2 border-dashed border-purple-200 hover:border-purple-400 bg-purple-50/30 rounded-2xl p-5 text-center transition-all">
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`relative border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer ${
+                isDragging
+                  ? 'border-purple-600 bg-purple-100/60 scale-[1.01]'
+                  : fileName
+                  ? 'border-emerald-300 bg-emerald-50/40'
+                  : 'border-purple-200 hover:border-purple-400 bg-purple-50/30'
+              }`}
+            >
               <input
+                ref={fileInputRef}
                 type="file"
                 accept=".pdf,application/pdf,image/png,image/jpeg"
                 onChange={handleFileChange}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                required={!fileDataUrl}
+                className="hidden"
               />
-              <div className="flex flex-col items-center justify-center space-y-2">
-                <div className="w-10 h-10 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center">
-                  <Upload className="w-5 h-5" />
+              <div className="flex flex-col items-center justify-center space-y-2.5">
+                <div
+                  className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-transform ${
+                    fileName
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-purple-100 text-purple-700'
+                  }`}
+                >
+                  {fileName ? (
+                    <FileCheck className="w-6 h-6" />
+                  ) : (
+                    <Upload className="w-6 h-6" />
+                  )}
                 </div>
+
                 {fileName ? (
-                  <div className="text-center">
-                    <p className="text-xs font-bold text-slate-800 flex items-center justify-center gap-1.5">
-                      <FileText className="w-4 h-4 text-purple-600" />
+                  <div className="text-center space-y-1">
+                    <p className="text-xs font-bold text-slate-900 flex items-center justify-center gap-1.5 break-all max-w-md mx-auto">
+                      <FileText className="w-4 h-4 text-emerald-600 shrink-0" />
                       <span>{fileName}</span>
                     </p>
-                    <p className="text-[10px] text-emerald-600 font-semibold mt-0.5">
-                      ✓ Archivo cargado correctamente (Listo para enviar)
+                    {fileSizeText && (
+                      <span className="inline-block text-[10px] font-mono bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
+                        {fileSizeText}
+                      </span>
+                    )}
+                    <p className="text-[11px] text-emerald-700 font-semibold">
+                      ✓ Archivo cargado correctamente (Listo para enviar al cliente)
                     </p>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        fileInputRef.current?.click();
+                      }}
+                      className="text-[11px] text-purple-700 hover:text-purple-900 font-bold underline mt-1 inline-block cursor-pointer"
+                    >
+                      Cambiar archivo PDF
+                    </button>
                   </div>
                 ) : (
                   <div>
-                    <p className="text-xs font-bold text-slate-700">
-                      Hacé clic o arrastrá el PDF de la factura ARCA acá
+                    <p className="text-xs font-bold text-slate-800">
+                      Hacé clic para seleccionar o arrastrá el PDF de la factura ARCA acá
                     </p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      Formatos soportados: PDF, PNG, JPG (Máx 50MB)
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Formatos soportados: PDF oficial ARCA / AFIP, JPG o PNG
                     </p>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        fileInputRef.current?.click();
+                      }}
+                      className="mt-2.5 px-4 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow-2xs inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Seleccionar Archivo PDF</span>
+                    </button>
                   </div>
                 )}
               </div>
