@@ -145,8 +145,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
   return (
     <div className="max-w-md w-full mx-auto my-2 sm:my-8 p-4 sm:p-6 bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-md sm:shadow-xl space-y-4 sm:space-y-5">
       <div className="text-center">
-        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-white flex items-center justify-center mx-auto mb-2 shadow-md border border-slate-100 p-1 overflow-hidden">
-          <Logo size={60} />
+        <div className="h-20 w-20 sm:h-24 sm:w-24 aspect-square rounded-full bg-white flex items-center justify-center mx-auto mb-3 shadow-md border border-purple-100 overflow-hidden shrink-0">
+          <Logo className="w-full h-full object-contain aspect-square" />
         </div>
         <h2 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">
           Estudio Ahilin Torres

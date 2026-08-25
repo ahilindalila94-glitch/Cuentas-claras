@@ -48,8 +48,8 @@ export const Header: React.FC<HeaderProps> = ({
           
           {/* Logo & Title */}
           <div className="flex items-center gap-3 shrink-0">
-            <div className="w-9 h-9 sm:w-11 sm:h-11 bg-white rounded-full flex items-center justify-center shadow-lg border border-slate-700/60 p-0.5 overflow-hidden shrink-0">
-              <Logo size={40} />
+            <div className="h-11 w-11 sm:h-13 sm:w-13 aspect-square bg-white rounded-full flex items-center justify-center shadow-md border border-purple-400/30 overflow-hidden shrink-0">
+              <Logo className="w-full h-full object-contain aspect-square" />
             </div>
             <div>
               <div className="flex items-center gap-2">
