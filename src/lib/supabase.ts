@@ -295,6 +295,24 @@ export const supabase = {
     }
   },
   
+  rpc: async (fnName: string, args: any = {}) => {
+    if (isSupabaseConfigured()) {
+      try {
+        const { data, error } = await realClient.rpc(fnName, args);
+        if (!error) return { data, error: null };
+      } catch (e) {
+        console.warn(`Error llamando rpc ${fnName}:`, e);
+      }
+    }
+    // Fallback: return unsynced records
+    const unsyncedStr = localStorage.getItem('local_unsynced_extractos') || '[]';
+    try {
+      const unsynced = JSON.parse(unsyncedStr);
+      return { data: unsynced, error: null };
+    } catch {
+      return { data: [], error: null };
+    }
+  },
   from: (table: string) => {
     let queryType = 'select'; // 'insert', 'update', 'select', 'delete'
     let insertData: any = null;

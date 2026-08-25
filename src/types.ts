@@ -2,6 +2,7 @@ export interface MovimientoDetalle {
   fecha: string;
   monto: number;
   pagador_nombre_cuit: string;
+  concepto?: string;
   // Specialized voucher & batch closing metadata
   tipo_operacion?: 'cupon_individual' | 'cierre_lote' | 'transferencia' | 'extracto' | 'factura_manual';
   tarjeta?: string; // ej: Visa, Mastercard, Cabal, Amex

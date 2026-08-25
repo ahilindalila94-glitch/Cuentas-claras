@@ -44,6 +44,8 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     setMsg(null);
 
     const finalCuit = esConsumidorFinal ? 'Consumidor Final' : (cuitRazonSocial.trim() || 'Consumidor Final');
@@ -67,7 +69,7 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
       const email = user?.email || 'cliente@cuentasclaras.com';
       const userId = user?.id && !user?.isLocalSession && user?.id !== 'demo-user-123' ? user.id : null;
 
-      // Complete schema payload supporting both 'receipts' and 'extractos' tables
+      // Complete schema payload matching receipts and extractos tables
       const recordPayload = {
         cuit: finalCuit,
         monto: numericMonto,
@@ -93,29 +95,20 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
         created_at: new Date().toISOString(),
       };
 
-      console.log('Insertando comprobante en Supabase:', recordPayload);
+      console.log('Insertando comprobante único en Supabase:', recordPayload);
 
-      // 1. Direct insert into 'receipts'
-      try {
-        const { error: receiptsError } = await supabase.from('receipts').insert([recordPayload]);
-        if (receiptsError) {
-          console.warn('Inserción en receipts devolvió aviso:', receiptsError);
-        }
-      } catch (rErr) {
-        console.warn('Nota inserción receipts:', rErr);
-      }
-
-      // 2. Direct insert into 'extractos' to guarantee persistence across table schemas
-      try {
+      // Single insert attempt to receipts table first, fallback to extractos if receipts table not found
+      const { error: receiptsError } = await supabase.from('receipts').insert([recordPayload]);
+      if (receiptsError) {
+        console.warn('Aviso en receipts, intentando fallback en extractos:', receiptsError);
         const { error: extractosError } = await supabase.from('extractos').insert([recordPayload]);
         if (extractosError) {
-          console.warn('Inserción en extractos devolvió aviso:', extractosError);
+          console.error('Error insertando en extractos:', extractosError);
+          throw extractosError;
         }
-      } catch (eErr) {
-        console.warn('Nota inserción extractos:', eErr);
       }
 
-      setMsg({ type: 'success', text: '¡Comprobante / Factura manual registrado con éxito en Supabase!' });
+      setMsg({ type: 'success', text: '¡Comprobante / Factura manual guardado con éxito en Supabase!' });
       
       if (!esConsumidorFinal) {
         setCuitRazonSocial('');
@@ -123,7 +116,7 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
       setMonto('');
       setConceptoNota('');
 
-      // Reload extractos list immediately so the client sees updated records without $0 totals
+      // Reload list immediately
       onSuccess();
     } catch (err: any) {
       console.error('Error al guardar solicitud manual en Supabase:', err);

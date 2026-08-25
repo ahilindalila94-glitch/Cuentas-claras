@@ -10,6 +10,7 @@ import { FacturaManualView } from './components/FacturaManualView';
 import { ComprobanteResultado, ItemHistorial, UserRole, PresetSample } from './types';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { analyzeComprobanteWithAI } from './lib/aiAnalyzer';
+import { extractPdfData } from './lib/pdfHelper';
 import { AlertCircle, X } from 'lucide-react';
 
 export function App() {
@@ -26,7 +27,7 @@ export function App() {
   // Real history initialized to empty array
   const [historial, setHistorial] = useState<ItemHistorial[]>([]);
 
-  // Function to load extractos from Supabase
+  // Function to load extractos and receipts from Supabase
   const fetchExtractos = async (currentUser: any) => {
     if (!currentUser) {
       setHistorial([]);
@@ -34,44 +35,109 @@ export function App() {
     }
 
     try {
-      const isContadora = currentUser.role === 'admin_contadora' && currentUser.email?.trim().toLowerCase() === 'ahilindalila94@gmail.com';
+      const isContadora =
+        currentUser.role === 'admin_contadora' ||
+        currentUser.email?.trim().toLowerCase() === 'ahilindalila94@gmail.com';
 
-      let query = supabase.from('extractos').select('*');
+      const allRecords: any[] = [];
 
-      // If client, strictly filter only by their user_id or email
-      if (!isContadora) {
-        if (currentUser.id && currentUser.id !== 'demo-user-123') {
-          query = query.or(`user_id.eq.${currentUser.id},user_email.eq.${currentUser.email}`);
-        } else {
-          query = query.eq('user_email', currentUser.email);
+      if (isContadora) {
+        // Global query for accountant: fetch ALL receipts without filtering by user_id
+        console.log('Cargando registros globales de contadora (ahilindalila94@gmail.com)...');
+
+        // 1. Global query on receipts
+        try {
+          const { data: receiptsData, error: rErr } = await supabase
+            .from('receipts')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+          if (receiptsData && Array.isArray(receiptsData)) {
+            allRecords.push(...receiptsData);
+          } else if (rErr) {
+            console.warn('Aviso en consulta global de receipts:', rErr);
+          }
+        } catch (rCatch) {
+          console.warn('Excepción consultando receipts:', rCatch);
+        }
+
+        // 2. Global query on extractos
+        try {
+          const { data: extractosData, error: eErr } = await supabase
+            .from('extractos')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+          if (extractosData && Array.isArray(extractosData)) {
+            allRecords.push(...extractosData);
+          } else if (eErr) {
+            console.warn('Aviso en consulta global de extractos:', eErr);
+          }
+        } catch (eCatch) {
+          console.warn('Excepción consultando extractos:', eCatch);
+        }
+      } else {
+        // Regular client: strictly filter by their own user_id or email
+        try {
+          let rQuery = supabase.from('receipts').select('*');
+          if (currentUser.id && currentUser.id !== 'demo-user-123' && !currentUser.isLocalSession) {
+            rQuery = rQuery.or(`user_id.eq.${currentUser.id},user_email.eq.${currentUser.email}`);
+          } else {
+            rQuery = rQuery.eq('user_email', currentUser.email);
+          }
+          const { data: rData } = await rQuery;
+          if (rData && Array.isArray(rData)) allRecords.push(...rData);
+        } catch (rErr) {
+          console.warn('Aviso consulta cliente receipts:', rErr);
+        }
+
+        try {
+          let eQuery = supabase.from('extractos').select('*');
+          if (currentUser.id && currentUser.id !== 'demo-user-123' && !currentUser.isLocalSession) {
+            eQuery = eQuery.or(`user_id.eq.${currentUser.id},user_email.eq.${currentUser.email}`);
+          } else {
+            eQuery = eQuery.eq('user_email', currentUser.email);
+          }
+          const { data: eData } = await eQuery;
+          if (eData && Array.isArray(eData)) allRecords.push(...eData);
+        } catch (eErr) {
+          console.warn('Aviso consulta cliente extractos:', eErr);
         }
       }
 
-      const { data, error } = await query;
+      // Deduplicate merged records
+      const seen = new Set<string>();
+      const uniqueRecords = allRecords.filter((item) => {
+        const key = item.id || `${item.created_at}-${item.monto || item.monto_total_acumulado}-${item.user_email}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
 
-      if (error) {
-        console.warn('Error al consultar extractos en Supabase:', error);
-        return;
-      }
+      if (uniqueRecords.length > 0) {
+        const mapped: ItemHistorial[] = uniqueRecords.map((item: any) => {
+          const totalMonto = Number(
+            item.monto_total_acumulado !== undefined && item.monto_total_acumulado !== null
+              ? item.monto_total_acumulado
+              : item.monto
+          ) || 0;
 
-      if (data && Array.isArray(data)) {
-        const mapped: ItemHistorial[] = data.map((item: any) => {
-          const totalMonto = Number(item.monto_total_acumulado !== undefined && item.monto_total_acumulado !== null ? item.monto_total_acumulado : item.monto) || 0;
-          const movimientos = Array.isArray(item.detalle_movimientos) && item.detalle_movimientos.length > 0
-            ? item.detalle_movimientos.map((m: any) => ({
-                ...m,
-                monto: Number(m.monto !== undefined && m.monto !== null ? m.monto : totalMonto) || 0,
-                pagador_nombre_cuit: m.pagador_nombre_cuit || item.cuit || 'Consumidor Final',
-              }))
-            : [
-                {
-                  fecha: item.created_at ? item.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
-                  monto: totalMonto,
-                  pagador_nombre_cuit: item.cuit || item.pagador_nombre_cuit || 'Consumidor Final',
-                  concepto: item.concepto,
-                  tipo_operacion: item.tipo_comprobante || 'factura_manual',
-                },
-              ];
+          const movimientos =
+            Array.isArray(item.detalle_movimientos) && item.detalle_movimientos.length > 0
+              ? item.detalle_movimientos.map((m: any) => ({
+                  ...m,
+                  monto: Number(m.monto !== undefined && m.monto !== null ? m.monto : totalMonto) || 0,
+                  pagador_nombre_cuit: m.pagador_nombre_cuit || item.cuit || 'Consumidor Final',
+                }))
+              : [
+                  {
+                    fecha: item.created_at ? item.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
+                    monto: totalMonto,
+                    pagador_nombre_cuit: item.cuit || item.pagador_nombre_cuit || 'Consumidor Final',
+                    concepto: item.concepto,
+                    tipo_operacion: item.tipo_comprobante || 'factura_manual',
+                  },
+                ];
 
           return {
             id: item.id || item._local_id || `db-${Date.now()}-${Math.random()}`,
@@ -98,7 +164,7 @@ export function App() {
         setHistorial(mapped);
       }
     } catch (err) {
-      console.error('Error fetching extractos:', err);
+      console.error('Error general fetching extractos/receipts:', err);
     }
   };
 
@@ -313,7 +379,28 @@ export function App() {
 
       let extracted: ComprobanteResultado;
 
-      if (mimeType.startsWith('text/') || lowerName.endsWith('.txt') || lowerName.endsWith('.csv')) {
+      if (mimeType === 'application/pdf' || lowerName.endsWith('.pdf')) {
+        // PDF Processing using pdfjs-dist
+        try {
+          console.log(`Extrayendo texto e imágenes de PDF: ${file.name} con pdfjs-dist...`);
+          const pdfData = await extractPdfData(file);
+          
+          extracted = await analyzeComprobanteWithAI({
+            fileData: pdfData.firstPageImageBase64 || (await fileToBase64(file)),
+            mimeType: pdfData.firstPageImageBase64 ? 'image/jpeg' : 'application/pdf',
+            rawText: pdfData.text,
+            fileName: file.name,
+          });
+        } catch (pdfErr: any) {
+          console.warn('Fallo en la lectura del PDF:', pdfErr);
+          const customMsg = pdfErr?.message || 'El archivo PDF está protegido o no se pudo interpretar.';
+          setAnalysisError(
+            `No se pudo leer el archivo PDF "${file.name}" (${customMsg}). Podés registrar la operación usando 'Carga Manual' o pegando el texto.`
+          );
+          setIsProcessing(false);
+          return;
+        }
+      } else if (mimeType.startsWith('text/') || lowerName.endsWith('.txt') || lowerName.endsWith('.csv')) {
         const text = await file.text();
         extracted = await analyzeComprobanteWithAI({
           rawText: text,
@@ -339,7 +426,7 @@ export function App() {
         id: `item-${Date.now()}`,
         nombreArchivo: file.name,
         tamanoArchivo: file.size,
-        tipoMime: file.type,
+        tipoMime: file.type || 'application/pdf',
         fechaAnalisis: new Date().toISOString(),
         resultado: extracted,
         rawJson: JSON.stringify(extracted, null, 2),
@@ -350,27 +437,37 @@ export function App() {
 
       setHistorial((prev) => [newItem, ...prev]);
 
-      // Direct client-side insert into Supabase table 'extractos'
+      // Direct client-side insert into Supabase
       if (user) {
         const payload = {
           origen_billetera: extracted.origen_billetera,
           fecha_periodo: extracted.fecha_periodo,
           monto_total_acumulado: Number(extracted.monto_total_acumulado),
+          monto: Number(extracted.monto_total_acumulado),
           detalle_movimientos: extracted.detalle_movimientos,
           nombre_archivo: file.name,
+          cuit: extracted.detalle_movimientos?.[0]?.pagador_nombre_cuit || 'Consumidor Final',
+          concepto: extracted.detalle_movimientos?.[0]?.concepto || `Comprobante ${extracted.origen_billetera}`,
           user_id: user.id === 'demo-user-123' || user.isLocalSession ? null : user.id,
           user_email: user.email,
           facturado: false,
           created_at: new Date().toISOString(),
         };
-        supabase.from('extractos').insert([payload]).catch((err: any) => {
-          console.warn('Auto insert Supabase note:', err);
+
+        // Insert into receipts first, fallback to extractos
+        supabase.from('receipts').insert([payload]).then(({ error }) => {
+          if (error) {
+            console.warn('Fallback insert a extractos:', error);
+            supabase.from('extractos').insert([payload]).catch((e) => console.warn('extractos insert note:', e));
+          }
+        }).catch(() => {
+          supabase.from('extractos').insert([payload]).catch((e) => console.warn('extractos fallback note:', e));
         });
       }
     } catch (err: any) {
       console.error('Error al analizar imagen/archivo con IA:', err);
       setAnalysisError(
-        `Error al procesar la imagen con IA: ${err?.message || 'No se pudo extraer la información del comprobante.'}`
+        `Error al procesar el archivo con IA: ${err?.message || 'No se pudo extraer la información del comprobante.'}`
       );
     } finally {
       setIsProcessing(false);
@@ -417,15 +514,24 @@ export function App() {
           origen_billetera: extracted.origen_billetera,
           fecha_periodo: extracted.fecha_periodo,
           monto_total_acumulado: Number(extracted.monto_total_acumulado),
+          monto: Number(extracted.monto_total_acumulado),
           detalle_movimientos: extracted.detalle_movimientos,
           nombre_archivo: 'Carga por Texto',
+          cuit: extracted.detalle_movimientos?.[0]?.pagador_nombre_cuit || 'Consumidor Final',
+          concepto: extracted.detalle_movimientos?.[0]?.concepto || `Texto ${extracted.origen_billetera}`,
           user_id: user.id === 'demo-user-123' || user.isLocalSession ? null : user.id,
           user_email: user.email,
           facturado: false,
           created_at: new Date().toISOString(),
         };
-        supabase.from('extractos').insert([payload]).catch((err: any) => {
-          console.warn('Auto insert Supabase note:', err);
+
+        supabase.from('receipts').insert([payload]).then(({ error }) => {
+          if (error) {
+            console.warn('Fallback insert a extractos:', error);
+            supabase.from('extractos').insert([payload]).catch((e) => console.warn('extractos insert note:', e));
+          }
+        }).catch(() => {
+          supabase.from('extractos').insert([payload]).catch((e) => console.warn('extractos fallback note:', e));
         });
       }
     } catch (err: any) {
