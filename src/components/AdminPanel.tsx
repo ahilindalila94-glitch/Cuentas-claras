@@ -17,13 +17,17 @@ import {
   ShoppingBag,
   Sparkles,
   Filter,
-  RefreshCw
+  RefreshCw,
+  Building2,
+  UserCheck,
+  AlertCircle
 } from 'lucide-react';
-import { ItemHistorial } from '../types';
+import { ItemHistorial, RegisteredClient } from '../types';
 import { formatCurrencyARS } from '../utils/formatters';
 
 interface AdminPanelProps {
   historial: ItemHistorial[];
+  registeredClients?: RegisteredClient[];
   onToggleFacturado: (id: string, currentStatus: boolean) => Promise<void>;
   onDeleteItem: (id: string) => void;
   onResetClient: (email: string) => void;
@@ -32,13 +36,14 @@ interface AdminPanelProps {
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
   historial,
+  registeredClients = [],
   onToggleFacturado,
   onDeleteItem,
   onResetClient,
   onRefresh,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [tipoFilter, setTipoFilter] = useState<'todos' | 'cupones' | 'lotes' | 'transferencias' | 'manuales'>('todos');
+  const [statusFilter, setStatusFilter] = useState<'todos' | 'pendientes' | 'al_dia' | 'cupones' | 'lotes' | 'manuales'>('todos');
   const [expandedClients, setExpandedClients] = useState<Record<string, boolean>>({});
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [sendingEmail, setSendingEmail] = useState<Record<string, boolean>>({});
@@ -77,12 +82,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  // Group history by user_email
+  // Group history by user_email AND include all registered clients even if they have 0 receipts
   const groupedClients = useMemo(() => {
     const clients: Record<
       string,
       {
         email: string;
+        nombre_comercio?: string;
+        cuit?: string;
+        created_at?: string;
         items: ItemHistorial[];
         totalAcumulado: number;
         totalFacturado: number;
@@ -92,8 +100,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       }
     > = {};
 
+    // 1. Seed with registered clients (excluding accountant admin)
+    registeredClients.forEach((rc) => {
+      const emailKey = rc.email?.toLowerCase().trim();
+      if (!emailKey || emailKey === 'ahilindalila94@gmail.com') return;
+
+      clients[emailKey] = {
+        email: emailKey,
+        nombre_comercio: rc.nombre_comercio,
+        cuit: rc.cuit,
+        created_at: rc.created_at || rc.last_active,
+        items: [],
+        totalAcumulado: 0,
+        totalFacturado: 0,
+        totalPendiente: 0,
+        totalCupones: 0,
+        totalLotes: 0,
+      };
+    });
+
+    // 2. Attach items from historial
     historial.forEach((item) => {
-      const emailKey = item.user_email || 'cliente_invitado@cuentasclaras.com';
+      const emailKey = item.user_email?.toLowerCase().trim() || 'cliente_invitado@cuentasclaras.com';
+      if (emailKey === 'ahilindalila94@gmail.com') return;
 
       if (!clients[emailKey]) {
         clients[emailKey] = {
@@ -128,24 +157,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       if (isLote) clients[emailKey].totalLotes += 1;
     });
 
-    return Object.values(clients).sort((a, b) => b.totalPendiente - a.totalPendiente);
-  }, [historial]);
+    return Object.values(clients).sort((a, b) => {
+      // Prioritize clients with pending balance, then by total accumulated, then by email
+      if (b.totalPendiente !== a.totalPendiente) {
+        return b.totalPendiente - a.totalPendiente;
+      }
+      return b.totalAcumulado - a.totalAcumulado;
+    });
+  }, [historial, registeredClients]);
 
-  // Filter grouped clients by search term and optional type filter
+  // Filter grouped clients by search term and status/type filter
   const filteredClients = useMemo(() => {
     return groupedClients
       .map((c) => {
         const matchingItems = c.items.filter((item) => {
-          if (tipoFilter === 'todos') return true;
+          if (statusFilter === 'todos' || statusFilter === 'pendientes' || statusFilter === 'al_dia') return true;
           const orig = (item.resultado?.origen_billetera || '').toLowerCase();
           const tipo = item.resultado?.tipo_comprobante || '';
-          if (tipoFilter === 'cupones')
+          if (statusFilter === 'cupones')
             return tipo === 'cupon_individual' || item.resultado?.detalle_movimientos?.some((m) => m.numero_cupon);
-          if (tipoFilter === 'lotes') return tipo === 'cierre_lote' || orig.includes('cierre de lote');
-          if (tipoFilter === 'manuales')
+          if (statusFilter === 'lotes') return tipo === 'cierre_lote' || orig.includes('cierre de lote');
+          if (statusFilter === 'manuales')
             return tipo === 'factura_manual' || orig.includes('manual');
-          if (tipoFilter === 'transferencias')
-            return !orig.includes('cierre de lote') && tipo !== 'cupon_individual' && tipo !== 'factura_manual';
           return true;
         });
 
@@ -155,23 +188,39 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         };
       })
       .filter((c) => {
-        const matchesSearch = !searchTerm.trim() || c.email.toLowerCase().includes(searchTerm.toLowerCase());
-        const hasMatchingItems = c.filteredItems.length > 0;
-        return matchesSearch && hasMatchingItems;
+        const s = searchTerm.toLowerCase().trim();
+        const matchesSearch =
+          !s ||
+          c.email.toLowerCase().includes(s) ||
+          (c.nombre_comercio && c.nombre_comercio.toLowerCase().includes(s)) ||
+          (c.cuit && c.cuit.includes(s));
+
+        if (!matchesSearch) return false;
+
+        if (statusFilter === 'todos') return true;
+        if (statusFilter === 'pendientes') return c.totalPendiente > 0;
+        if (statusFilter === 'al_dia') return c.totalPendiente === 0;
+        
+        // For specific type filters (cupones, lotes, manuales), client must have matching items
+        return c.filteredItems.length > 0;
       });
-  }, [groupedClients, searchTerm, tipoFilter]);
+  }, [groupedClients, searchTerm, statusFilter]);
 
   // Total Metrics for the admin
   const metrics = useMemo(() => {
     let totalGeneral = 0;
     let totalFacturado = 0;
     let totalPendiente = 0;
-    let cantClientes = Object.keys(groupedClients).length;
+    const cantClientes = groupedClients.length;
+    let cantClientesSinComprobantes = 0;
 
     groupedClients.forEach((c) => {
       totalGeneral += c.totalAcumulado;
       totalFacturado += c.totalFacturado;
       totalPendiente += c.totalPendiente;
+      if (c.items.length === 0) {
+        cantClientesSinComprobantes += 1;
+      }
     });
 
     return {
@@ -179,6 +228,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       totalFacturado,
       totalPendiente,
       cantClientes,
+      cantClientesSinComprobantes,
     };
   }, [groupedClients]);
 
@@ -260,14 +310,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </span>
               <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
               <span className="text-xs text-slate-500 font-medium font-mono">
-                Visibilidad Global (Supabase Receipts)
+                Visibilidad Total de Clientes & Comprobantes
               </span>
             </div>
             <h2 className="text-xl sm:text-2xl font-black text-slate-900 mt-1">
-              Libro de Conciliación y Clientes
+              Registro Integral de Clientes y Conciliación
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Administrá los comprobantes, cupones POSNET, cierres de lote y facturas cargadas por todos tus clientes.
+              Supervisá a todos los clientes registrados en la app, sus montos pendientes, cierres de lote y facturas cargadas.
             </p>
           </div>
 
@@ -277,7 +327,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <Search className="absolute left-3.5 top-2.5 w-4 h-4 text-slate-400" />
               <input
                 type="text"
-                placeholder="Buscar por email del cliente..."
+                placeholder="Buscar por email, comercio o CUIT..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-9.5 pr-4 py-2 bg-slate-50 border border-slate-200 hover:border-slate-300 focus:border-purple-500 focus:bg-white text-xs font-semibold rounded-xl outline-hidden transition-all placeholder:text-slate-400"
@@ -291,7 +341,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 onClick={handleManualRefresh}
                 disabled={isRefreshing}
                 className="p-2.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-xl transition-all shadow-3xs flex items-center justify-center shrink-0 cursor-pointer"
-                title="Actualizar registros desde Supabase"
+                title="Actualizar clientes y comprobantes"
               >
                 <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
               </button>
@@ -307,7 +357,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
             <div>
               <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Clientes Registrados</p>
-              <h4 className="text-lg font-black text-slate-800 mt-0.5">{metrics.cantClientes}</h4>
+              <h4 className="text-lg font-black text-slate-800 mt-0.5">
+                {metrics.cantClientes}{' '}
+                {metrics.cantClientesSinComprobantes > 0 && (
+                  <span className="text-xs font-semibold text-slate-400">
+                    ({metrics.cantClientesSinComprobantes} nuevo{metrics.cantClientesSinComprobantes > 1 ? 's' : ''})
+                  </span>
+                )}
+              </h4>
             </div>
           </div>
 
@@ -342,23 +399,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </div>
         </div>
 
-        {/* Quick Type Filter Tabs */}
+        {/* Quick Filter Tabs */}
         <div className="flex flex-wrap items-center gap-2 mt-6 pt-5 border-t border-slate-100">
           <span className="text-xs font-bold text-slate-500 mr-2 flex items-center gap-1">
-            <Filter className="w-3.5 h-3.5" /> Filtrar tipo:
+            <Filter className="w-3.5 h-3.5" /> Filtrar vista:
           </span>
           {[
-            { id: 'todos', label: 'Todos los Comprobantes' },
-            { id: 'cupones', label: '💳 Cupones POS / Tarjeta' },
+            { id: 'todos', label: `Todos los Clientes (${metrics.cantClientes})` },
+            { id: 'pendientes', label: '⏳ Con Pendientes' },
+            { id: 'al_dia', label: '✓ Al Día / Nuevos' },
+            { id: 'cupones', label: '💳 Cupones POS' },
             { id: 'lotes', label: '🧾 Cierres de Lote' },
             { id: 'manuales', label: '📝 Facturas' },
-            { id: 'transferencias', label: '🏦 Otros Comprobantes' },
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setTipoFilter(tab.id as any)}
+              onClick={() => setStatusFilter(tab.id as any)}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                tipoFilter === tab.id
+                statusFilter === tab.id
                   ? 'bg-purple-600 text-white shadow-2xs'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
@@ -373,16 +431,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       <div className="space-y-4">
         {filteredClients.length === 0 ? (
           <div className="bg-white border border-slate-200 rounded-3xl p-12 text-center">
-            <Mail className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-            <p className="text-sm font-bold text-slate-800">No se encontraron comprobantes registrados en Supabase</p>
+            <User className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+            <p className="text-sm font-bold text-slate-800">No se encontraron clientes registrados</p>
             <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-              Cuando tus clientes registren comprobantes desde el módulo de carga, aparecerán aquí agrupados y en tiempo real.
+              Cuando un cliente cree su cuenta o cargue comprobantes, aparecerá automáticamente aquí en tu panel de contadora.
             </p>
           </div>
         ) : (
           filteredClients.map((client) => {
             const isExpanded = !!expandedClients[client.email];
             const itemsToShow = client.filteredItems || client.items;
+            const hasZeroItems = client.items.length === 0;
 
             return (
               <div
@@ -395,26 +454,51 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:bg-slate-50/50 transition-colors"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center shrink-0 border border-slate-200">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 border ${
+                      hasZeroItems 
+                        ? 'bg-purple-50 text-purple-600 border-purple-200' 
+                        : 'bg-slate-100 text-slate-700 border-slate-200'
+                    }`}>
                       <User className="w-4.5 h-4.5" />
                     </div>
                     <div>
-                      <h3 className="text-xs sm:text-sm font-bold text-slate-800 leading-snug break-all">
-                        {client.email}
-                      </h3>
-                      <div className="flex flex-wrap items-center gap-2 mt-1">
-                        <span className="text-[10px] text-slate-500 font-medium">
-                          {client.items.length} comprobante(s)
-                        </span>
-                        {client.totalCupones > 0 && (
-                          <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">
-                            {client.totalCupones} cupón(es)
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-xs sm:text-sm font-bold text-slate-800 leading-snug break-all">
+                          {client.email}
+                        </h3>
+                        {client.nombre_comercio && (
+                          <span className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-semibold flex items-center gap-1">
+                            <Building2 className="w-2.5 h-2.5" /> {client.nombre_comercio}
                           </span>
                         )}
-                        {client.totalLotes > 0 && (
-                          <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
-                            {client.totalLotes} lote(s)
+                        {client.cuit && (
+                          <span className="text-[10px] bg-purple-50 text-purple-700 px-2 py-0.5 rounded font-mono font-semibold">
+                            CUIT: {client.cuit}
                           </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 mt-1">
+                        {hasZeroItems ? (
+                          <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100 flex items-center gap-1">
+                            <UserCheck className="w-3 h-3" /> Nuevo Cliente Registrado (0 comprobantes)
+                          </span>
+                        ) : (
+                          <>
+                            <span className="text-[10px] text-slate-500 font-medium">
+                              {client.items.length} comprobante(s)
+                            </span>
+                            {client.totalCupones > 0 && (
+                              <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">
+                                {client.totalCupones} cupón(es)
+                              </span>
+                            )}
+                            {client.totalLotes > 0 && (
+                              <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
+                                {client.totalLotes} lote(s)
+                              </span>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>
@@ -428,7 +512,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           client.totalPendiente > 0 ? 'text-amber-600' : 'text-emerald-600'
                         }`}
                       >
-                        {client.totalPendiente > 0 ? formatCurrencyARS(client.totalPendiente) : 'Todo al día ✓'}
+                        {client.totalPendiente > 0 
+                          ? formatCurrencyARS(client.totalPendiente) 
+                          : hasZeroItems 
+                          ? '$0 (Sin carga)' 
+                          : 'Todo al día ✓'}
                       </p>
                     </div>
 
@@ -438,7 +526,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         onClick={(e) => handleSendReminder(e, client.email, client.totalPendiente)}
                         disabled={sendingEmail[client.email]}
                         className="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 disabled:bg-slate-100 disabled:text-slate-400 border border-purple-200/60 rounded-xl text-[10px] font-extrabold tracking-wide flex items-center gap-1 transition-all shadow-3xs active:scale-95 cursor-pointer"
-                        title="Enviar correo recordatorio de carga"
+                        title={hasZeroItems ? "Enviar recordatorio para que suba comprobantes" : "Enviar recordatorio de pendientes"}
                       >
                         {sendingEmail[client.email] ? (
                           <>
@@ -455,17 +543,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           e.stopPropagation();
                           if (
                             window.confirm(
-                              `¿Desea resetear todos los comprobantes del cliente ${client.email}? Se eliminarán definitivamente de Supabase.`
+                              `¿Desea resetear o quitar al cliente ${client.email}? Se eliminarán sus registros.`
                             )
                           ) {
                             onResetClient(client.email);
                           }
                         }}
                         className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/60 rounded-xl text-[10px] font-extrabold tracking-wide flex items-center gap-1 transition-all shadow-3xs active:scale-95 cursor-pointer"
-                        title="Eliminar y resetear todos los comprobantes de este cliente"
+                        title="Eliminar y resetear todos los datos de este cliente"
                       >
                         <Trash2 className="w-3 h-3 text-rose-500" />
-                        <span>Resetear 🗑️</span>
+                        <span>Quitar 🗑️</span>
                       </button>
 
                       <div className="text-right hidden md:block">
@@ -490,133 +578,145 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       <span>Comprobantes de {client.email} ({itemsToShow.length})</span>
                     </h4>
 
-                    <div className="grid grid-cols-1 gap-3">
-                      {itemsToShow.map((item, index) => {
-                        const firstMov = item.resultado?.detalle_movimientos?.[0];
-                        const isCupon =
-                          item.resultado?.tipo_comprobante === 'cupon_individual' ||
-                          firstMov?.numero_cupon ||
-                          firstMov?.tarjeta;
-                        const isLote =
-                          item.resultado?.tipo_comprobante === 'cierre_lote' ||
-                          (item.resultado?.origen_billetera || '').toLowerCase().includes('cierre de lote');
+                    {itemsToShow.length === 0 ? (
+                      <div className="bg-white border border-dashed border-purple-200 rounded-xl p-6 text-center space-y-2">
+                        <UserCheck className="w-6 h-6 text-purple-500 mx-auto" />
+                        <p className="text-xs font-bold text-slate-700">
+                          Cliente registrado en la plataforma
+                        </p>
+                        <p className="text-[11px] text-slate-500 max-w-md mx-auto">
+                          Este usuario creó su cuenta pero todavía no ha subido comprobantes, cupones o cierres de lote. Podés hacer clic en <strong>Enviar Recordatorio ✉️</strong> para solicitarle la carga del mes.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-3">
+                        {itemsToShow.map((item, index) => {
+                          const firstMov = item.resultado?.detalle_movimientos?.[0];
+                          const isCupon =
+                            item.resultado?.tipo_comprobante === 'cupon_individual' ||
+                            firstMov?.numero_cupon ||
+                            firstMov?.tarjeta;
+                          const isLote =
+                            item.resultado?.tipo_comprobante === 'cierre_lote' ||
+                            (item.resultado?.origen_billetera || '').toLowerCase().includes('cierre de lote');
 
-                        return (
-                          <div
-                            key={`${item.id || 'admin-item'}-${index}`}
-                            className="bg-white border border-slate-200/90 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-3xs transition-all"
-                          >
-                            <div className="space-y-1.5">
-                              <div className="flex flex-wrap items-center gap-2">
-                                {getItemTypeBadge(item)}
-                                <span className="text-[10px] text-slate-500 font-mono">
-                                  Fecha / Período: {item.resultado?.fecha_periodo || 'N/A'}
-                                </span>
-                                {firstMov?.pagador_nombre_cuit && (
-                                  <span className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-semibold">
-                                    CUIT: {firstMov.pagador_nombre_cuit}
+                          return (
+                            <div
+                              key={`${item.id || 'admin-item'}-${index}`}
+                              className="bg-white border border-slate-200/90 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-3xs transition-all"
+                            >
+                              <div className="space-y-1.5">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {getItemTypeBadge(item)}
+                                  <span className="text-[10px] text-slate-500 font-mono">
+                                    Fecha / Período: {item.resultado?.fecha_periodo || 'N/A'}
                                   </span>
+                                  {firstMov?.pagador_nombre_cuit && (
+                                    <span className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-semibold">
+                                      CUIT: {firstMov.pagador_nombre_cuit}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <h5 className="text-xs font-bold text-slate-800 flex items-center gap-1.5 break-all">
+                                  <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                  <span>{item.nombreArchivo || firstMov?.concepto || 'Comprobante'}</span>
+                                </h5>
+
+                                {firstMov?.concepto && firstMov.concepto !== item.nombreArchivo && (
+                                  <p className="text-[11px] text-slate-600 font-medium">
+                                    Concepto: {firstMov.concepto}
+                                  </p>
                                 )}
-                              </div>
 
-                              <h5 className="text-xs font-bold text-slate-800 flex items-center gap-1.5 break-all">
-                                <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                <span>{item.nombreArchivo || firstMov?.concepto || 'Comprobante'}</span>
-                              </h5>
+                                {/* Specialized POS / Voucher information tags */}
+                                {isCupon && (
+                                  <div className="text-[11px] text-purple-900 bg-purple-50/80 px-2.5 py-1 rounded-lg border border-purple-100 flex flex-wrap items-center gap-2">
+                                    <span>
+                                      💳 Tarjeta: <strong>{firstMov?.tarjeta || 'POS / Terminal'}</strong>
+                                    </span>
+                                    {firstMov?.numero_cupon && (
+                                      <>
+                                        <span>•</span>
+                                        <span>
+                                          Cupón N°: <strong>{firstMov.numero_cupon}</strong>
+                                        </span>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
 
-                              {firstMov?.concepto && firstMov.concepto !== item.nombreArchivo && (
-                                <p className="text-[11px] text-slate-600 font-medium">
-                                  Concepto: {firstMov.concepto}
-                                </p>
-                              )}
+                                {isLote && (
+                                  <div className="text-[11px] text-indigo-900 bg-indigo-50/80 px-2.5 py-1 rounded-lg border border-indigo-100 flex flex-wrap items-center gap-2">
+                                    <span>
+                                      🧾 Lote N°: <strong>{firstMov?.numero_lote || 'N/A'}</strong>
+                                    </span>
+                                    {firstMov?.numero_terminal && (
+                                      <>
+                                        <span>•</span>
+                                        <span>
+                                          Terminal: <strong>{firstMov.numero_terminal}</strong>
+                                        </span>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
 
-                              {/* Specialized POS / Voucher information tags */}
-                              {isCupon && (
-                                <div className="text-[11px] text-purple-900 bg-purple-50/80 px-2.5 py-1 rounded-lg border border-purple-100 flex flex-wrap items-center gap-2">
-                                  <span>
-                                    💳 Tarjeta: <strong>{firstMov?.tarjeta || 'POS / Terminal'}</strong>
-                                  </span>
-                                  {firstMov?.numero_cupon && (
-                                    <>
-                                      <span>•</span>
-                                      <span>
-                                        Cupón N°: <strong>{firstMov.numero_cupon}</strong>
-                                      </span>
-                                    </>
-                                  )}
-                                </div>
-                              )}
-
-                              {isLote && (
-                                <div className="text-[11px] text-indigo-900 bg-indigo-50/80 px-2.5 py-1 rounded-lg border border-indigo-100 flex flex-wrap items-center gap-2">
-                                  <span>
-                                    🧾 Lote N°: <strong>{firstMov?.numero_lote || 'N/A'}</strong>
-                                  </span>
-                                  {firstMov?.numero_terminal && (
-                                    <>
-                                      <span>•</span>
-                                      <span>
-                                        Terminal: <strong>{firstMov.numero_terminal}</strong>
-                                      </span>
-                                    </>
-                                  )}
-                                </div>
-                              )}
-
-                              <p className="text-[10px] text-slate-400">
-                                Registrado el: {new Date(item.fechaAnalisis).toLocaleDateString('es-AR')}
-                              </p>
-                            </div>
-
-                            <div className="flex items-center justify-between md:justify-end gap-6 border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
-                              <div className="text-left md:text-right">
-                                <p className="text-[9px] uppercase font-bold tracking-wider text-slate-400">
-                                  Monto del Comprobante
-                                </p>
-                                <p className="text-sm font-black text-slate-800">
-                                  {formatCurrencyARS(item.resultado?.monto_total_acumulado || 0)}
+                                <p className="text-[10px] text-slate-400">
+                                  Registrado el: {new Date(item.fechaAnalisis).toLocaleDateString('es-AR')}
                                 </p>
                               </div>
 
-                              {/* Billing Checkbox / Switch & Delete Icon */}
-                              <div className="flex items-center gap-3">
-                                <div className="flex items-center gap-2.5 bg-slate-50 border border-slate-100 px-3 py-2 rounded-xl">
-                                  <span
-                                    className={`text-[10px] font-extrabold uppercase tracking-wide ${
-                                      item.facturado ? 'text-emerald-700' : 'text-amber-700'
-                                    }`}
+                              <div className="flex items-center justify-between md:justify-end gap-6 border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
+                                <div className="text-left md:text-right">
+                                  <p className="text-[9px] uppercase font-bold tracking-wider text-slate-400">
+                                    Monto del Comprobante
+                                  </p>
+                                  <p className="text-sm font-black text-slate-800">
+                                    {formatCurrencyARS(item.resultado?.monto_total_acumulado || 0)}
+                                  </p>
+                                </div>
+
+                                {/* Billing Checkbox / Switch & Delete Icon */}
+                                <div className="flex items-center gap-3">
+                                  <div className="flex items-center gap-2.5 bg-slate-50 border border-slate-100 px-3 py-2 rounded-xl">
+                                    <span
+                                      className={`text-[10px] font-extrabold uppercase tracking-wide ${
+                                        item.facturado ? 'text-emerald-700' : 'text-amber-700'
+                                      }`}
+                                    >
+                                      {item.facturado ? 'Facturado' : 'Pendiente'}
+                                    </span>
+                                    <label className="relative inline-flex items-center cursor-pointer select-none">
+                                      <input
+                                        type="checkbox"
+                                        checked={!!item.facturado}
+                                        disabled={updatingId === item.id}
+                                        onChange={() => handleCheckboxChange(item.id, !!item.facturado)}
+                                        className="sr-only peer"
+                                      />
+                                      <div className="w-9 h-5 bg-slate-200 hover:bg-slate-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                                    </label>
+                                  </div>
+
+                                  <button
+                                    onClick={() => {
+                                      if (window.confirm('¿Desea eliminar este comprobante individual?')) {
+                                        onDeleteItem(item.id);
+                                      }
+                                    }}
+                                    className="p-2 bg-rose-50/50 hover:bg-rose-50 rounded-xl text-rose-500 hover:text-rose-700 border border-rose-100 hover:border-rose-200 transition-all active:scale-95 shrink-0 cursor-pointer"
+                                    title="Eliminar este comprobante individual"
                                   >
-                                    {item.facturado ? 'Facturado' : 'Pendiente'}
-                                  </span>
-                                  <label className="relative inline-flex items-center cursor-pointer select-none">
-                                    <input
-                                      type="checkbox"
-                                      checked={!!item.facturado}
-                                      disabled={updatingId === item.id}
-                                      onChange={() => handleCheckboxChange(item.id, !!item.facturado)}
-                                      className="sr-only peer"
-                                    />
-                                    <div className="w-9 h-5 bg-slate-200 hover:bg-slate-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
-                                  </label>
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
                                 </div>
-
-                                <button
-                                  onClick={() => {
-                                    if (window.confirm('¿Desea eliminar este comprobante individual?')) {
-                                      onDeleteItem(item.id);
-                                    }
-                                  }}
-                                  className="p-2 bg-rose-50/50 hover:bg-rose-50 rounded-xl text-rose-500 hover:text-rose-700 border border-rose-100 hover:border-rose-200 transition-all active:scale-95 shrink-0 cursor-pointer"
-                                  title="Eliminar este comprobante individual"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
                               </div>
                             </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -627,3 +727,4 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     </div>
   );
 };
+

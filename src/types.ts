@@ -52,6 +52,16 @@ export interface ItemHistorial {
 
 export type UserRole = 'admin_contadora' | 'cliente';
 
+export interface RegisteredClient {
+  id?: string;
+  email: string;
+  nombre_comercio?: string;
+  cuit?: string;
+  role?: UserRole;
+  created_at?: string;
+  last_active?: string;
+}
+
 export interface AppUser {
   id: string;
   email: string;

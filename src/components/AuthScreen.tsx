@@ -1,17 +1,20 @@
 import React, { useState } from 'react';
-import { supabase } from '../lib/supabase';
-import { KeyRound, Mail, UserPlus, LogIn, Sparkles, UserCheck } from 'lucide-react';
+import { supabase, recordRegisteredClient } from '../lib/supabase';
+import { KeyRound, Mail, UserPlus, LogIn, Sparkles, Building2, CreditCard } from 'lucide-react';
 import { UserRole } from '../types';
 import { Logo } from './Logo';
 
 interface AuthScreenProps {
   onAuthSuccess: (user: any) => void;
+  onCancel?: () => void;
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [nombreComercio, setNombreComercio] = useState('');
+  const [cuit, setCuit] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -32,7 +35,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     try {
       if (isSignUp) {
         // Save metadata locally for offline/fallback lookup
-        localStorage.setItem(`meta_${cleanEmail}`, JSON.stringify({ role: finalRole }));
+        localStorage.setItem(`meta_${cleanEmail}`, JSON.stringify({ 
+          role: finalRole,
+          nombreComercio: nombreComercio.trim(),
+          cuit: cuit.trim(),
+        }));
 
         const { data, error: signUpErr } = await supabase.auth.signUp({
           email: cleanEmail,
@@ -40,23 +47,36 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
           options: {
             data: {
               role: finalRole,
+              nombre_comercio: nombreComercio.trim(),
+              cuit: cuit.trim(),
             }
           }
         });
         if (signUpErr) throw signUpErr;
+
+        // Register client in persistent server registry & Supabase
+        await recordRegisteredClient({
+          id: data?.user?.id || 'user-' + btoa(cleanEmail),
+          email: cleanEmail,
+          role: finalRole,
+          nombre_comercio: nombreComercio.trim() || undefined,
+          cuit: cuit.trim() || undefined,
+        });
         
         if (data?.user) {
           const userWithRole = {
             ...data.user,
             email: cleanEmail,
-            role: finalRole
+            role: finalRole,
+            nombre_comercio: nombreComercio.trim(),
+            cuit: cuit.trim(),
           };
           setSuccessMsg(`¡Registro exitoso! Iniciando sesión...`);
           setTimeout(() => {
             onAuthSuccess(userWithRole);
-          }, 1200);
+          }, 1000);
         } else {
-          setSuccessMsg(`¡Registro exitoso! Ya podés iniciar sesión.`);
+          setSuccessMsg(`¡Registro exitoso! Ya podés ingresar a tu cuenta.`);
           setIsSignUp(false);
         }
       } else {
@@ -66,6 +86,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         });
         if (signInErr) throw signInErr;
         
+        // Register client in persistent server registry & Supabase
+        await recordRegisteredClient({
+          id: data?.user?.id,
+          email: cleanEmail,
+          role: finalRole,
+        });
+
         if (data?.user) {
           const userWithRole = {
             ...data.user,
@@ -104,6 +131,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         const localUser = {
           id: 'local-user-' + btoa(cleanEmail),
           email: cleanEmail,
+          nombre_comercio: nombreComercio.trim(),
+          cuit: cuit.trim(),
           isLocalSession: true,
           created_at: new Date().toISOString(),
           role: finalRole,
@@ -112,15 +141,24 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         localStorage.setItem('local_supabase_session', JSON.stringify(localUser));
         localStorage.setItem(`meta_${cleanEmail}`, JSON.stringify({ role: finalRole }));
         
+        // Register in persistent client registry
+        recordRegisteredClient({
+          id: localUser.id,
+          email: cleanEmail,
+          role: finalRole,
+          nombre_comercio: nombreComercio.trim() || undefined,
+          cuit: cuit.trim() || undefined,
+        });
+
         setSuccessMsg(
-          `¡Ingreso correcto en modo persistente como ${
+          `¡Ingreso correcto como ${
             finalRole === 'admin_contadora' ? 'CONTADORA (Admin)' : 'CLIENTE'
           }!`
         );
         
         setTimeout(() => {
           onAuthSuccess(localUser);
-        }, 1200);
+        }, 1000);
       } else {
         setError(err?.message || 'Ocurrió un error al autenticar. Verifique sus datos.');
       }
@@ -131,14 +169,22 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
 
   const handleQuickDemoMode = () => {
     // Quick demo for clients with clean zero state
+    const mockEmail = 'cliente.demo@cuentasclaras.com';
     const mockUser = {
       id: 'demo-client-' + Math.random().toString(36).substring(2, 7),
-      email: 'cliente.demo@cuentasclaras.com',
+      email: mockEmail,
+      nombre_comercio: 'Comercio Demo S.A.',
       isDemo: true,
       role: 'cliente' as UserRole,
       user_metadata: { role: 'cliente' }
     };
     localStorage.setItem(`meta_${mockUser.email}`, JSON.stringify({ role: 'cliente' }));
+    recordRegisteredClient({
+      id: mockUser.id,
+      email: mockEmail,
+      role: 'cliente',
+      nombre_comercio: 'Comercio Demo S.A.',
+    });
     onAuthSuccess(mockUser);
   };
 
@@ -204,10 +250,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         </div>
       )}
 
-      <form onSubmit={handleAuth} className="space-y-4">
+      <form onSubmit={handleAuth} className="space-y-3.5">
         <div>
           <label className="block text-xs font-black text-slate-700 uppercase tracking-wider mb-1.5">
-            Correo Electrónico
+            Correo Electrónico *
           </label>
           <div className="relative">
             <Mail className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -216,15 +262,51 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="tu@correo.com"
+              placeholder="cliente@correo.com"
               className="w-full pl-10 pr-4 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all placeholder:text-slate-400 text-slate-900"
             />
           </div>
         </div>
 
+        {isSignUp && (
+          <div className="space-y-3.5 pt-1 animate-in fade-in">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                Nombre / Razón Social / Negocio (Opcional)
+              </label>
+              <div className="relative">
+                <Building2 className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={nombreComercio}
+                  onChange={(e) => setNombreComercio(e.target.value)}
+                  placeholder="Ej: Kiosco Centro / Juan Pérez"
+                  className="w-full pl-10 pr-4 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all placeholder:text-slate-400 text-slate-900"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                CUIT del Cliente (Opcional)
+              </label>
+              <div className="relative">
+                <CreditCard className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={cuit}
+                  onChange={(e) => setCuit(e.target.value)}
+                  placeholder="Ej: 20-33445566-7"
+                  className="w-full pl-10 pr-4 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all placeholder:text-slate-400 text-slate-900 font-mono"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
         <div>
           <label className="block text-xs font-black text-slate-700 uppercase tracking-wider mb-1.5">
-            Contraseña
+            Contraseña *
           </label>
           <div className="relative">
             <KeyRound className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -243,7 +325,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         <button
           type="submit"
           disabled={isLoading}
-          className="w-full py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-300 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+          className="w-full py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-300 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer mt-2"
         >
           {isLoading ? (
             <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -269,9 +351,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
           className="w-full py-2.5 px-3 bg-slate-50 hover:bg-purple-50 text-slate-600 hover:text-purple-700 border border-slate-200/80 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
         >
           <Sparkles className="w-3.5 h-3.5 text-purple-500" />
-          <span>Explorar como Cliente de Prueba (Historial en $0)</span>
+          <span>Explorar como Cliente de Prueba</span>
         </button>
       </div>
     </div>
   );
 };
+

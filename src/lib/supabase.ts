@@ -508,3 +508,153 @@ export const supabase = {
     return builder;
   }
 } as any;
+
+// Helper to register / sync clients across Server and Supabase
+export const recordRegisteredClient = async (clientData: {
+  email: string;
+  role?: string;
+  id?: string;
+  nombre_comercio?: string;
+  cuit?: string;
+}) => {
+  const cleanEmail = clientData.email.trim().toLowerCase();
+  const payload = {
+    ...clientData,
+    email: cleanEmail,
+    last_active: new Date().toISOString(),
+  };
+
+  // 1. Sync to local storage registry
+  try {
+    const localStr = localStorage.getItem('local_registered_clients') || '[]';
+    const localList = JSON.parse(localStr);
+    const existingIndex = localList.findIndex((c: any) => c.email.toLowerCase() === cleanEmail);
+    if (existingIndex >= 0) {
+      localList[existingIndex] = { ...localList[existingIndex], ...payload };
+    } else {
+      localList.push({ ...payload, created_at: new Date().toISOString() });
+    }
+    localStorage.setItem('local_registered_clients', JSON.stringify(localList));
+  } catch (e) {
+    console.warn('Error saving local registered clients:', e);
+  }
+
+  // 2. Sync to Backend API
+  try {
+    fetch('/api/clients/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch((err) => console.warn('API client register note:', err));
+  } catch (e) {
+    // Non-blocking
+  }
+
+  // 3. Sync to Supabase tables if configured
+  try {
+    if (isSupabaseConfigured()) {
+      try {
+        await (realClient
+          .from('clients')
+          .upsert(
+            {
+              email: cleanEmail,
+              role: payload.role || (cleanEmail === 'ahilindalila94@gmail.com' ? 'admin_contadora' : 'cliente'),
+              nombre_comercio: payload.nombre_comercio || null,
+              cuit: payload.cuit || null,
+              last_active: payload.last_active,
+            },
+            { onConflict: 'email' }
+          ) as any);
+      } catch (e) {}
+
+      try {
+        await (realClient
+          .from('profiles')
+          .upsert(
+            {
+              email: cleanEmail,
+              role: payload.role || (cleanEmail === 'ahilindalila94@gmail.com' ? 'admin_contadora' : 'cliente'),
+              nombre_comercio: payload.nombre_comercio || null,
+              cuit: payload.cuit || null,
+              last_active: payload.last_active,
+            },
+            { onConflict: 'email' }
+          ) as any);
+      } catch (e) {}
+    }
+  } catch (e) {
+    // Non-blocking
+  }
+};
+
+// Helper to fetch all registered clients
+export const fetchRegisteredClients = async (): Promise<any[]> => {
+  const clientsMap = new Map<string, any>();
+
+  // 1. Fetch from backend API
+  try {
+    const res = await fetch('/api/clients');
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.clients)) {
+        data.clients.forEach((c: any) => {
+          if (c.email) clientsMap.set(c.email.toLowerCase().trim(), c);
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('Aviso consultando /api/clients:', e);
+  }
+
+  // 2. Fetch from Supabase tables
+  if (isSupabaseConfigured()) {
+    try {
+      const { data: dbClients } = await realClient.from('clients').select('*');
+      if (Array.isArray(dbClients)) {
+        dbClients.forEach((c: any) => {
+          if (c.email) {
+            const key = c.email.toLowerCase().trim();
+            clientsMap.set(key, { ...clientsMap.get(key), ...c });
+          }
+        });
+      }
+    } catch (e) {
+      // Non-blocking
+    }
+
+    try {
+      const { data: dbProfiles } = await realClient.from('profiles').select('*');
+      if (Array.isArray(dbProfiles)) {
+        dbProfiles.forEach((p: any) => {
+          if (p.email) {
+            const key = p.email.toLowerCase().trim();
+            clientsMap.set(key, { ...clientsMap.get(key), ...p });
+          }
+        });
+      }
+    } catch (e) {
+      // Non-blocking
+    }
+  }
+
+  // 3. Fetch from local storage fallback
+  try {
+    const localStr = localStorage.getItem('local_registered_clients') || '[]';
+    const localList = JSON.parse(localStr);
+    if (Array.isArray(localList)) {
+      localList.forEach((c: any) => {
+        if (c.email) {
+          const key = c.email.toLowerCase().trim();
+          if (!clientsMap.has(key)) {
+            clientsMap.set(key, c);
+          }
+        }
+      });
+    }
+  } catch (e) {
+    // Non-blocking
+  }
+
+  return Array.from(clientsMap.values());
+};

@@ -4,8 +4,8 @@ import { LedgerHistory } from './components/LedgerHistory';
 import { AuthScreen } from './components/AuthScreen';
 import { AdminPanel } from './components/AdminPanel';
 import { FacturaManualView } from './components/FacturaManualView';
-import { ItemHistorial, UserRole } from './types';
-import { supabase, isSupabaseConfigured } from './lib/supabase';
+import { ItemHistorial, UserRole, RegisteredClient } from './types';
+import { supabase, isSupabaseConfigured, fetchRegisteredClients } from './lib/supabase';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<ActiveTabType>('factura_manual');
@@ -16,11 +16,14 @@ export function App() {
 
   // Real history initialized to empty array
   const [historial, setHistorial] = useState<ItemHistorial[]>([]);
+  // Registered clients list for accountant view
+  const [registeredClients, setRegisteredClients] = useState<RegisteredClient[]>([]);
 
-  // Function to load extractos and receipts from Supabase
+  // Function to load extractos, receipts, and registered clients
   const fetchExtractos = async (currentUser: any) => {
     if (!currentUser) {
       setHistorial([]);
+      setRegisteredClients([]);
       return;
     }
 
@@ -32,6 +35,14 @@ export function App() {
       const allRecords: any[] = [];
 
       if (isContadora) {
+        // Fetch all registered clients
+        try {
+          const clientsList = await fetchRegisteredClients();
+          setRegisteredClients(clientsList);
+        } catch (cErr) {
+          console.warn('Aviso cargando clientes registrados:', cErr);
+        }
+
         // Global query for accountant: fetch ALL receipts without filtering by user_id
         console.log('Cargando registros globales de contadora (ahilindalila94@gmail.com)...');
 
@@ -339,12 +350,30 @@ export function App() {
     }
   };
 
-  // Reset all records for a client
+  // Reset all records for a client & optionally remove from registry
   const handleResetClient = async (email: string) => {
-    setHistorial((prev) => prev.filter((item) => item.user_email !== email));
+    const cleanEmail = email.toLowerCase().trim();
+    setHistorial((prev) => prev.filter((item) => item.user_email?.toLowerCase().trim() !== cleanEmail));
+    
+    // Also remove from backend client registry
+    try {
+      fetch(`/api/clients/${encodeURIComponent(cleanEmail)}`, { method: 'DELETE' }).catch(() => {});
+    } catch (e) {}
+
+    // Remove from local storage registry
+    try {
+      const localStr = localStorage.getItem('local_registered_clients') || '[]';
+      const localList = JSON.parse(localStr);
+      const filtered = localList.filter((c: any) => c.email?.toLowerCase().trim() !== cleanEmail);
+      localStorage.setItem('local_registered_clients', JSON.stringify(filtered));
+      setRegisteredClients((prev) => prev.filter((c) => c.email.toLowerCase().trim() !== cleanEmail));
+    } catch (e) {}
+
     try {
       await supabase.from('receipts').delete().eq('user_email', email);
       await supabase.from('extractos').delete().eq('user_email', email);
+      await supabase.from('clients').delete().eq('email', email);
+      await supabase.from('profiles').delete().eq('email', email);
     } catch (e) {
       console.error('Error reseteando cliente:', e);
     }
@@ -396,6 +425,7 @@ export function App() {
             {activeTab === 'panel_control' && (
               <AdminPanel
                 historial={historial}
+                registeredClients={registeredClients}
                 onToggleFacturado={handleToggleFacturado}
                 onDeleteItem={handleDeleteItem}
                 onResetClient={handleResetClient}

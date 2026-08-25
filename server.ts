@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
@@ -13,6 +14,36 @@ const currentFilename = typeof __filename !== "undefined"
 const currentDirname = typeof __dirname !== "undefined"
   ? __dirname
   : path.dirname(currentFilename);
+
+const CLIENTS_REGISTRY_FILE = path.join(process.cwd(), "clients_registry.json");
+
+function getStoredClients(): Array<{
+  id?: string;
+  email: string;
+  nombre_comercio?: string;
+  cuit?: string;
+  role?: string;
+  created_at: string;
+  last_active: string;
+}> {
+  try {
+    if (fs.existsSync(CLIENTS_REGISTRY_FILE)) {
+      const raw = fs.readFileSync(CLIENTS_REGISTRY_FILE, "utf-8");
+      return JSON.parse(raw);
+    }
+  } catch (err) {
+    console.error("Error reading clients registry file:", err);
+  }
+  return [];
+}
+
+function persistClients(clients: any[]) {
+  try {
+    fs.writeFileSync(CLIENTS_REGISTRY_FILE, JSON.stringify(clients, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Error saving clients registry file:", err);
+  }
+}
 
 async function startServer() {
   const app = express();
@@ -267,6 +298,79 @@ Extrae todas las transferencias recibidas e ingresos y genera la respuesta JSON 
         error: "Ocurrió un error al analizar el comprobante.",
         details: err?.message || String(err),
       });
+    }
+  });
+
+  // API: Get all registered clients
+  app.get("/api/clients", (_req, res) => {
+    try {
+      const clients = getStoredClients();
+      return res.json({ clients });
+    } catch (err: any) {
+      console.error("Error obteniendo clientes:", err);
+      return res.status(500).json({ error: "Error al consultar clientes", details: String(err) });
+    }
+  });
+
+  // API: Register or update active client
+  app.post("/api/clients/register", (req, res) => {
+    try {
+      const { email, role, id, nombre_comercio, cuit } = req.body;
+      if (!email) {
+        return res.status(400).json({ error: "El email es obligatorio." });
+      }
+
+      const cleanEmail = String(email).trim().toLowerCase();
+      const existing = getStoredClients();
+      const now = new Date().toISOString();
+
+      const existingIndex = existing.findIndex((c) => c.email.toLowerCase() === cleanEmail);
+
+      if (existingIndex >= 0) {
+        existing[existingIndex] = {
+          ...existing[existingIndex],
+          id: id || existing[existingIndex].id,
+          role: role || existing[existingIndex].role,
+          nombre_comercio: nombre_comercio || existing[existingIndex].nombre_comercio,
+          cuit: cuit || existing[existingIndex].cuit,
+          last_active: now,
+        };
+      } else {
+        existing.push({
+          id: id || `client-${Date.now()}`,
+          email: cleanEmail,
+          nombre_comercio: nombre_comercio || undefined,
+          cuit: cuit || undefined,
+          role: role || (cleanEmail === "ahilindalila94@gmail.com" ? "admin_contadora" : "cliente"),
+          created_at: now,
+          last_active: now,
+        });
+      }
+
+      persistClients(existing);
+      console.log(`[CLIENT REGISTER] Cliente registrado/actualizado: ${cleanEmail}`);
+
+      return res.json({
+        success: true,
+        client: existing.find((c) => c.email.toLowerCase() === cleanEmail),
+        totalClients: existing.length,
+      });
+    } catch (err: any) {
+      console.error("Error al registrar cliente:", err);
+      return res.status(500).json({ error: "No se pudo registrar el cliente", details: String(err) });
+    }
+  });
+
+  // API: Delete client from registry
+  app.delete("/api/clients/:email", (req, res) => {
+    try {
+      const targetEmail = req.params.email?.trim().toLowerCase();
+      const existing = getStoredClients();
+      const filtered = existing.filter((c) => c.email.toLowerCase() !== targetEmail);
+      persistClients(filtered);
+      return res.json({ success: true, remaining: filtered.length });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Error eliminando cliente", details: String(err) });
     }
   });
 
