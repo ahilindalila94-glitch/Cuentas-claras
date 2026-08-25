@@ -16,6 +16,7 @@ const currentDirname = typeof __dirname !== "undefined"
   : path.dirname(currentFilename);
 
 const CLIENTS_REGISTRY_FILE = path.join(process.cwd(), "clients_registry.json");
+const FACTURAS_ARCA_FILE = path.join(process.cwd(), "facturas_arca.json");
 
 function getStoredClients(): Array<{
   id?: string;
@@ -42,6 +43,26 @@ function persistClients(clients: any[]) {
     fs.writeFileSync(CLIENTS_REGISTRY_FILE, JSON.stringify(clients, null, 2), "utf-8");
   } catch (err) {
     console.error("Error saving clients registry file:", err);
+  }
+}
+
+function getStoredFacturasArca(): Array<any> {
+  try {
+    if (fs.existsSync(FACTURAS_ARCA_FILE)) {
+      const raw = fs.readFileSync(FACTURAS_ARCA_FILE, "utf-8");
+      return JSON.parse(raw);
+    }
+  } catch (err) {
+    console.error("Error reading facturas ARCA file:", err);
+  }
+  return [];
+}
+
+function persistFacturasArca(facturas: any[]) {
+  try {
+    fs.writeFileSync(FACTURAS_ARCA_FILE, JSON.stringify(facturas, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Error saving facturas ARCA file:", err);
   }
 }
 
@@ -405,6 +426,96 @@ Extrae todas las transferencias recibidas e ingresos y genera la respuesta JSON 
         error: "No se pudo procesar el envío de correo.",
         details: err?.message || String(err),
       });
+    }
+  });
+
+  // API: Get Facturas ARCA (optionally filter by email)
+  app.get("/api/facturas-arca", (req, res) => {
+    try {
+      const emailFilter = (req.query.email as string)?.trim().toLowerCase();
+      const all = getStoredFacturasArca();
+      if (emailFilter) {
+        const filtered = all.filter((f) => f.client_email?.toLowerCase() === emailFilter);
+        return res.json({ facturas: filtered });
+      }
+      return res.json({ facturas: all });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Error obteniendo facturas ARCA", details: String(err) });
+    }
+  });
+
+  // API: Save / Upload Factura ARCA PDF
+  app.post("/api/facturas-arca", (req, res) => {
+    try {
+      const {
+        id,
+        client_email,
+        numero_factura,
+        tipo_factura,
+        periodo,
+        fecha_emision,
+        monto_total,
+        cae,
+        vencimiento_cae,
+        archivo_nombre,
+        archivo_url,
+        archivo_tipo,
+        comentario_contadora,
+        comprobantes_asociados_ids,
+      } = req.body;
+
+      if (!client_email || !archivo_url) {
+        return res.status(400).json({ error: "El email del cliente y el archivo PDF de la factura son requeridos." });
+      }
+
+      const cleanEmail = String(client_email).trim().toLowerCase();
+      const existing = getStoredFacturasArca();
+      const now = new Date().toISOString();
+
+      const newFactura = {
+        id: id || `arca-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        client_email: cleanEmail,
+        numero_factura: numero_factura || `Factura ARCA #${Date.now().toString().slice(-6)}`,
+        tipo_factura: tipo_factura || "Factura C",
+        periodo: periodo || new Date().toLocaleDateString("es-AR", { month: "long", year: "numeric" }),
+        fecha_emision: fecha_emision || now.slice(0, 10),
+        monto_total: Number(monto_total) || 0,
+        cae: cae || "",
+        vencimiento_cae: vencimiento_cae || "",
+        archivo_nombre: archivo_nombre || `Factura_ARCA_${cleanEmail.split("@")[0]}.pdf`,
+        archivo_url,
+        archivo_tipo: archivo_tipo || "application/pdf",
+        comentario_contadora: comentario_contadora || "Factura oficial ARCA emitida por tu Estudio Contable Ahilin Torres.",
+        created_at: now,
+        comprobantes_asociados_ids: comprobantes_asociados_ids || [],
+      };
+
+      existing.unshift(newFactura);
+      persistFacturasArca(existing);
+
+      console.log(`[FACTURA ARCA CREADA] Factura ${newFactura.numero_factura} subida para ${cleanEmail} por $${newFactura.monto_total}`);
+
+      return res.json({
+        success: true,
+        factura: newFactura,
+        total: existing.length,
+      });
+    } catch (err: any) {
+      console.error("Error al guardar factura ARCA:", err);
+      return res.status(500).json({ error: "No se pudo guardar la factura ARCA", details: String(err) });
+    }
+  });
+
+  // API: Delete Factura ARCA
+  app.delete("/api/facturas-arca/:id", (req, res) => {
+    try {
+      const targetId = req.params.id;
+      const existing = getStoredFacturasArca();
+      const filtered = existing.filter((f) => f.id !== targetId);
+      persistFacturasArca(filtered);
+      return res.json({ success: true, remaining: filtered.length });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Error eliminando factura ARCA", details: String(err) });
     }
   });
 

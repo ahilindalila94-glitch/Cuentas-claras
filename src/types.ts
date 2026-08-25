@@ -62,6 +62,24 @@ export interface RegisteredClient {
   last_active?: string;
 }
 
+export interface FacturaArca {
+  id: string;
+  client_email: string;
+  numero_factura: string; // ej: "Factura B 00001-00000456"
+  tipo_factura?: string; // ej: "Factura C", "Factura B", "Factura A", "Recibo C"
+  periodo?: string; // ej: "08/2026", "Agosto 2026"
+  fecha_emision: string;
+  monto_total: number;
+  cae?: string;
+  vencimiento_cae?: string;
+  archivo_nombre: string;
+  archivo_url: string; // base64 data URL or storage URL
+  archivo_tipo?: string;
+  comentario_contadora?: string;
+  created_at: string;
+  comprobantes_asociados_ids?: string[];
+}
+
 export interface AppUser {
   id: string;
   email: string;

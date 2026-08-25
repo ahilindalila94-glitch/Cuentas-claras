@@ -658,3 +658,133 @@ export const fetchRegisteredClients = async (): Promise<any[]> => {
 
   return Array.from(clientsMap.values());
 };
+
+// ==========================================
+// FACTURAS ARCA (AFIP) PERSISTENCE HELPERS
+// ==========================================
+
+export const fetchFacturasArca = async (clientEmail?: string): Promise<any[]> => {
+  const facturasMap = new Map<string, any>();
+  const cleanEmail = clientEmail?.toLowerCase().trim();
+
+  // 1. Fetch from server API
+  try {
+    const url = cleanEmail ? `/api/facturas-arca?email=${encodeURIComponent(cleanEmail)}` : '/api/facturas-arca';
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.facturas)) {
+        data.facturas.forEach((f: any) => {
+          if (f.id) facturasMap.set(f.id, f);
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('Aviso consultando /api/facturas-arca:', e);
+  }
+
+  // 2. Fetch from Supabase if configured
+  if (isSupabaseConfigured()) {
+    try {
+      let query = realClient.from('facturas_arca').select('*');
+      if (cleanEmail) {
+        query = query.eq('client_email', cleanEmail);
+      }
+      const { data: dbFacturas } = await query;
+      if (Array.isArray(dbFacturas)) {
+        dbFacturas.forEach((f: any) => {
+          if (f.id) facturasMap.set(f.id, { ...facturasMap.get(f.id), ...f });
+        });
+      }
+    } catch (e) {
+      // Non-blocking
+    }
+  }
+
+  // 3. Fallback from localStorage
+  try {
+    const localStr = localStorage.getItem('local_facturas_arca') || '[]';
+    const localList = JSON.parse(localStr);
+    if (Array.isArray(localList)) {
+      localList.forEach((f: any) => {
+        if (!f.id) return;
+        if (cleanEmail && f.client_email?.toLowerCase().trim() !== cleanEmail) return;
+        if (!facturasMap.has(f.id)) {
+          facturasMap.set(f.id, f);
+        }
+      });
+    }
+  } catch (e) {
+    // Non-blocking
+  }
+
+  return Array.from(facturasMap.values()).sort(
+    (a, b) => new Date(b.created_at || b.fecha_emision).getTime() - new Date(a.created_at || a.fecha_emision).getTime()
+  );
+};
+
+export const saveFacturaArca = async (facturaData: any): Promise<any> => {
+  const cleanEmail = facturaData.client_email?.toLowerCase().trim();
+  const id = facturaData.id || `arca-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const itemToSave = {
+    ...facturaData,
+    id,
+    client_email: cleanEmail,
+    created_at: facturaData.created_at || new Date().toISOString(),
+  };
+
+  // 1. Save to local storage
+  try {
+    const localStr = localStorage.getItem('local_facturas_arca') || '[]';
+    const localList = JSON.parse(localStr);
+    const updated = [itemToSave, ...localList.filter((f: any) => f.id !== id)];
+    localStorage.setItem('local_facturas_arca', JSON.stringify(updated));
+  } catch (e) {}
+
+  // 2. Post to server
+  try {
+    await fetch('/api/facturas-arca', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(itemToSave),
+    });
+  } catch (e) {
+    console.warn('Aviso guardando en /api/facturas-arca:', e);
+  }
+
+  // 3. Sync to Supabase
+  if (isSupabaseConfigured()) {
+    try {
+      await (realClient.from('facturas_arca').upsert(itemToSave) as any);
+    } catch (e) {
+      // Non-blocking
+    }
+  }
+
+  return itemToSave;
+};
+
+export const deleteFacturaArca = async (id: string): Promise<boolean> => {
+  // 1. Remove from local storage
+  try {
+    const localStr = localStorage.getItem('local_facturas_arca') || '[]';
+    const localList = JSON.parse(localStr);
+    const updated = localList.filter((f: any) => f.id !== id);
+    localStorage.setItem('local_facturas_arca', JSON.stringify(updated));
+  } catch (e) {}
+
+  // 2. Delete from server
+  try {
+    await fetch(`/api/facturas-arca/${id}`, { method: 'DELETE' });
+  } catch (e) {}
+
+  // 3. Delete from Supabase
+  if (isSupabaseConfigured()) {
+    try {
+      await (realClient.from('facturas_arca').delete().eq('id', id) as any);
+    } catch (e) {}
+  }
+
+  return true;
+};
+

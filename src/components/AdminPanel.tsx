@@ -20,41 +20,75 @@ import {
   RefreshCw,
   Building2,
   UserCheck,
-  AlertCircle
+  AlertCircle,
+  FileCheck,
+  Plus
 } from 'lucide-react';
-import { ItemHistorial, RegisteredClient } from '../types';
+import { ItemHistorial, RegisteredClient, FacturaArca } from '../types';
 import { formatCurrencyARS } from '../utils/formatters';
+import { SubirFacturaArcaModal } from './SubirFacturaArcaModal';
+import { FacturasArcaList } from './FacturasArcaList';
 
 interface AdminPanelProps {
   historial: ItemHistorial[];
   registeredClients?: RegisteredClient[];
+  facturasArca?: FacturaArca[];
   onToggleFacturado: (id: string, currentStatus: boolean) => Promise<void>;
   onDeleteItem: (id: string) => void;
   onResetClient: (email: string) => void;
   onRefresh?: () => void;
+  onSaveFacturaArca?: (facturaData: Partial<FacturaArca>, markPendingAsFacturado?: boolean) => Promise<void>;
+  onDeleteFacturaArca?: (id: string) => Promise<void>;
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
   historial,
   registeredClients = [],
+  facturasArca = [],
   onToggleFacturado,
   onDeleteItem,
   onResetClient,
   onRefresh,
+  onSaveFacturaArca,
+  onDeleteFacturaArca,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'todos' | 'pendientes' | 'al_dia' | 'cupones' | 'lotes' | 'manuales'>('todos');
+  const [statusFilter, setStatusFilter] = useState<'todos' | 'pendientes' | 'al_dia' | 'cupones' | 'lotes' | 'manuales' | 'arca'>('todos');
   const [expandedClients, setExpandedClients] = useState<Record<string, boolean>>({});
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [sendingEmail, setSendingEmail] = useState<Record<string, boolean>>({});
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [selectedClientForArca, setSelectedClientForArca] = useState<{
+    email: string;
+    nombre_comercio?: string;
+    cuit?: string;
+    pendingAmount?: number;
+  } | null>(null);
 
   const handleManualRefresh = async () => {
     if (onRefresh) {
       setIsRefreshing(true);
       await onRefresh();
       setTimeout(() => setIsRefreshing(false), 500);
+    }
+  };
+
+  const handleOpenArcaModal = (e: React.MouseEvent, client: { email: string; nombre_comercio?: string; cuit?: string; totalPendiente?: number }) => {
+    e.stopPropagation();
+    setSelectedClientForArca({
+      email: client.email,
+      nombre_comercio: client.nombre_comercio,
+      cuit: client.cuit,
+      pendingAmount: client.totalPendiente || 0,
+    });
+  };
+
+  const handleSaveArcaSubmit = async (facturaData: Partial<FacturaArca>, markPending?: boolean) => {
+    if (onSaveFacturaArca) {
+      await onSaveFacturaArca(facturaData, markPending);
+      setSuccessMsg(`Factura ARCA subida con éxito para ${facturaData.client_email}. ¡El cliente ya puede descargarla desde su perfil!`);
+      setTimeout(() => setSuccessMsg(null), 6000);
     }
   };
 
@@ -92,6 +126,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         cuit?: string;
         created_at?: string;
         items: ItemHistorial[];
+        facturasArca: FacturaArca[];
         totalAcumulado: number;
         totalFacturado: number;
         totalPendiente: number;
@@ -111,6 +146,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         cuit: rc.cuit,
         created_at: rc.created_at || rc.last_active,
         items: [],
+        facturasArca: [],
         totalAcumulado: 0,
         totalFacturado: 0,
         totalPendiente: 0,
@@ -128,6 +164,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         clients[emailKey] = {
           email: emailKey,
           items: [],
+          facturasArca: [],
           totalAcumulado: 0,
           totalFacturado: 0,
           totalPendiente: 0,
@@ -157,6 +194,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       if (isLote) clients[emailKey].totalLotes += 1;
     });
 
+    // 3. Attach Facturas ARCA to respective clients
+    facturasArca.forEach((f) => {
+      const emailKey = f.client_email?.toLowerCase().trim();
+      if (!emailKey || emailKey === 'ahilindalila94@gmail.com') return;
+
+      if (!clients[emailKey]) {
+        clients[emailKey] = {
+          email: emailKey,
+          items: [],
+          facturasArca: [],
+          totalAcumulado: 0,
+          totalFacturado: 0,
+          totalPendiente: 0,
+          totalCupones: 0,
+          totalLotes: 0,
+        };
+      }
+      clients[emailKey].facturasArca.push(f);
+    });
+
     return Object.values(clients).sort((a, b) => {
       // Prioritize clients with pending balance, then by total accumulated, then by email
       if (b.totalPendiente !== a.totalPendiente) {
@@ -164,7 +221,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       }
       return b.totalAcumulado - a.totalAcumulado;
     });
-  }, [historial, registeredClients]);
+  }, [historial, registeredClients, facturasArca]);
 
   // Filter grouped clients by search term and status/type filter
   const filteredClients = useMemo(() => {
@@ -179,6 +236,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           if (statusFilter === 'lotes') return tipo === 'cierre_lote' || orig.includes('cierre de lote');
           if (statusFilter === 'manuales')
             return tipo === 'factura_manual' || orig.includes('manual');
+          if (statusFilter === 'arca') return true;
           return true;
         });
 
@@ -200,6 +258,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         if (statusFilter === 'todos') return true;
         if (statusFilter === 'pendientes') return c.totalPendiente > 0;
         if (statusFilter === 'al_dia') return c.totalPendiente === 0;
+        if (statusFilter === 'arca') return c.facturasArca.length > 0;
         
         // For specific type filters (cupones, lotes, manuales), client must have matching items
         return c.filteredItems.length > 0;
@@ -211,7 +270,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     let totalGeneral = 0;
     let totalFacturado = 0;
     let totalPendiente = 0;
-    const cantClientes = groupedClients.length;
+    const cantClientes = Math.max(
+      groupedClients.length,
+      registeredClients.filter((c) => c.email?.toLowerCase().trim() !== 'ahilindalila94@gmail.com').length
+    );
     let cantClientesSinComprobantes = 0;
 
     groupedClients.forEach((c) => {
@@ -229,8 +291,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       totalPendiente,
       cantClientes,
       cantClientesSinComprobantes,
+      totalFacturasArca: facturasArca.length,
     };
-  }, [groupedClients]);
+  }, [groupedClients, registeredClients, facturasArca]);
 
   const toggleClientExpand = (email: string) => {
     setExpandedClients((prev) => ({
@@ -408,6 +471,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             { id: 'todos', label: `Todos los Clientes (${metrics.cantClientes})` },
             { id: 'pendientes', label: '⏳ Con Pendientes' },
             { id: 'al_dia', label: '✓ Al Día / Nuevos' },
+            { id: 'arca', label: `📄 Facturas ARCA (${metrics.totalFacturasArca || 0})` },
             { id: 'cupones', label: '💳 Cupones POS' },
             { id: 'lotes', label: '🧾 Cierres de Lote' },
             { id: 'manuales', label: '📝 Facturas' },
@@ -500,11 +564,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             )}
                           </>
                         )}
+
+                        {(client.facturasArca || []).length > 0 && (
+                          <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
+                            <FileCheck className="w-3 h-3 text-emerald-600" />
+                            {client.facturasArca.length} Factura(s) ARCA lista(s)
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between sm:justify-end gap-6 border-t sm:border-t-0 pt-3 sm:pt-0 border-slate-100">
+                  <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-5 border-t sm:border-t-0 pt-3 sm:pt-0 border-slate-100">
                     <div className="text-left sm:text-right space-y-0.5">
                       <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Total Pendiente</p>
                       <p
@@ -520,12 +591,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        id={`btn-upload-arca-${client.email}`}
+                        type="button"
+                        onClick={(e) => handleOpenArcaModal(e, client)}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-extrabold tracking-wide flex items-center gap-1.5 transition-all shadow-xs active:scale-95 cursor-pointer"
+                        title="Subir la Factura Oficial de ARCA emitida en PDF para que el cliente la descargue"
+                      >
+                        <FileCheck className="w-3.5 h-3.5" />
+                        <span>Subir Factura ARCA (PDF) 📄</span>
+                      </button>
+
                       <button
                         id={`btn-remind-${client.email}`}
                         onClick={(e) => handleSendReminder(e, client.email, client.totalPendiente)}
                         disabled={sendingEmail[client.email]}
-                        className="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 disabled:bg-slate-100 disabled:text-slate-400 border border-purple-200/60 rounded-xl text-[10px] font-extrabold tracking-wide flex items-center gap-1 transition-all shadow-3xs active:scale-95 cursor-pointer"
+                        className="px-2.5 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 disabled:bg-slate-100 disabled:text-slate-400 border border-purple-200/60 rounded-xl text-[10px] font-extrabold tracking-wide flex items-center gap-1 transition-all shadow-3xs active:scale-95 cursor-pointer"
                         title={hasZeroItems ? "Enviar recordatorio para que suba comprobantes" : "Enviar recordatorio de pendientes"}
                       >
                         {sendingEmail[client.email] ? (
@@ -534,7 +616,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             <span>Enviando...</span>
                           </>
                         ) : (
-                          <span>Enviar Recordatorio ✉️</span>
+                          <span>Recordatorio ✉️</span>
                         )}
                       </button>
 
@@ -549,7 +631,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             onResetClient(client.email);
                           }
                         }}
-                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/60 rounded-xl text-[10px] font-extrabold tracking-wide flex items-center gap-1 transition-all shadow-3xs active:scale-95 cursor-pointer"
+                        className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/60 rounded-xl text-[10px] font-extrabold tracking-wide flex items-center gap-1 transition-all shadow-3xs active:scale-95 cursor-pointer"
                         title="Eliminar y resetear todos los datos de este cliente"
                       >
                         <Trash2 className="w-3 h-3 text-rose-500" />
@@ -572,11 +654,46 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                 {/* Expanded Client Items list */}
                 {isExpanded && (
-                  <div className="border-t border-slate-100 bg-slate-50/30 p-5 space-y-3.5">
-                    <h4 className="text-[10px] uppercase font-bold tracking-wider text-slate-400 flex items-center gap-1">
-                      <Layers className="w-3.5 h-3.5" />
-                      <span>Comprobantes de {client.email} ({itemsToShow.length})</span>
-                    </h4>
+                  <div className="border-t border-slate-100 bg-slate-50/40 p-5 space-y-6">
+                    {/* ARCA Invoices Section for this Client */}
+                    <div className="bg-white rounded-2xl p-4 sm:p-5 border border-emerald-100 shadow-3xs space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
+                            <FileCheck className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-bold text-slate-900">
+                              Facturas Oficiales ARCA Emitidas ({(client.facturasArca || []).length})
+                            </h4>
+                            <p className="text-[11px] text-slate-500">
+                              Archivos PDF que el cliente {client.email} visualiza y descarga directamente en su cuenta.
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={(e) => handleOpenArcaModal(e, client)}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 self-start sm:self-auto transition-all shadow-3xs cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Subir Factura ARCA PDF</span>
+                        </button>
+                      </div>
+
+                      <FacturasArcaList
+                        facturas={client.facturasArca || []}
+                        isAdmin={true}
+                        onDeleteFactura={onDeleteFacturaArca}
+                      />
+                    </div>
+
+                    <div className="space-y-3">
+                      <h4 className="text-[10px] uppercase font-bold tracking-wider text-slate-400 flex items-center gap-1">
+                        <Layers className="w-3.5 h-3.5" />
+                        <span>Comprobantes y Cierres de Lote de {client.email} ({itemsToShow.length})</span>
+                      </h4>
 
                     {itemsToShow.length === 0 ? (
                       <div className="bg-white border border-dashed border-purple-200 rounded-xl p-6 text-center space-y-2">
@@ -717,6 +834,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         })}
                       </div>
                     )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -724,6 +842,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           })
         )}
       </div>
+
+      {/* ARCA Invoice Upload Modal */}
+      {selectedClientForArca && (
+        <SubirFacturaArcaModal
+          clientEmail={selectedClientForArca.email}
+          clientName={selectedClientForArca.nombre_comercio}
+          clientCuit={selectedClientForArca.cuit}
+          pendingAmount={selectedClientForArca.pendingAmount}
+          onClose={() => setSelectedClientForArca(null)}
+          onSave={handleSaveArcaSubmit}
+        />
+      )}
     </div>
   );
 };

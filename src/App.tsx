@@ -4,8 +4,15 @@ import { LedgerHistory } from './components/LedgerHistory';
 import { AuthScreen } from './components/AuthScreen';
 import { AdminPanel } from './components/AdminPanel';
 import { FacturaManualView } from './components/FacturaManualView';
-import { ItemHistorial, UserRole, RegisteredClient } from './types';
-import { supabase, isSupabaseConfigured, fetchRegisteredClients } from './lib/supabase';
+import { ItemHistorial, UserRole, RegisteredClient, FacturaArca } from './types';
+import {
+  supabase,
+  isSupabaseConfigured,
+  fetchRegisteredClients,
+  fetchFacturasArca,
+  saveFacturaArca,
+  deleteFacturaArca,
+} from './lib/supabase';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<ActiveTabType>('factura_manual');
@@ -18,12 +25,15 @@ export function App() {
   const [historial, setHistorial] = useState<ItemHistorial[]>([]);
   // Registered clients list for accountant view
   const [registeredClients, setRegisteredClients] = useState<RegisteredClient[]>([]);
+  // ARCA Official Invoices (PDFs) uploaded by accountant
+  const [facturasArca, setFacturasArca] = useState<FacturaArca[]>([]);
 
-  // Function to load extractos, receipts, and registered clients
+  // Function to load extractos, receipts, registered clients, and ARCA invoices
   const fetchExtractos = async (currentUser: any) => {
     if (!currentUser) {
       setHistorial([]);
       setRegisteredClients([]);
+      setFacturasArca([]);
       return;
     }
 
@@ -31,6 +41,14 @@ export function App() {
       const isContadora =
         currentUser.role === 'admin_contadora' ||
         currentUser.email?.trim().toLowerCase() === 'ahilindalila94@gmail.com';
+
+      // Fetch ARCA invoices
+      try {
+        const arcaList = await fetchFacturasArca(isContadora ? undefined : currentUser.email);
+        setFacturasArca(arcaList);
+      } catch (aErr) {
+        console.warn('Aviso cargando facturas ARCA:', aErr);
+      }
 
       const allRecords: any[] = [];
 
@@ -374,6 +392,7 @@ export function App() {
       await supabase.from('extractos').delete().eq('user_email', email);
       await supabase.from('clients').delete().eq('email', email);
       await supabase.from('profiles').delete().eq('email', email);
+      await supabase.from('facturas_arca').delete().eq('client_email', email);
     } catch (e) {
       console.error('Error reseteando cliente:', e);
     }
@@ -385,6 +404,46 @@ export function App() {
     } else {
       setHistorial([]);
     }
+  };
+
+  // Handle uploading/saving a Factura ARCA PDF
+  const handleSaveFacturaArca = async (
+    facturaData: Omit<FacturaArca, 'id' | 'created_at'>,
+    markPendingAsFacturado?: boolean
+  ) => {
+    const saved = await saveFacturaArca(facturaData);
+    setFacturasArca((prev) => [saved, ...prev.filter((f) => f.id !== saved.id)]);
+
+    // If accountant checked "Marcar movimientos pendientes como facturados"
+    if (markPendingAsFacturado && facturaData.client_email) {
+      const clientEmail = facturaData.client_email.toLowerCase().trim();
+      setHistorial((prev) =>
+        prev.map((item) =>
+          item.user_email?.toLowerCase().trim() === clientEmail
+            ? { ...item, facturado: true }
+            : item
+        )
+      );
+
+      try {
+        await supabase
+          .from('receipts')
+          .update({ facturado: true })
+          .eq('user_email', facturaData.client_email);
+        await supabase
+          .from('extractos')
+          .update({ facturado: true })
+          .eq('user_email', facturaData.client_email);
+      } catch (err) {
+        console.warn('Aviso marcando facturado:', err);
+      }
+    }
+  };
+
+  // Handle deleting a Factura ARCA
+  const handleDeleteFacturaArca = async (id: string) => {
+    await deleteFacturaArca(id);
+    setFacturasArca((prev) => prev.filter((f) => f.id !== id));
   };
 
   return (
@@ -426,9 +485,12 @@ export function App() {
               <AdminPanel
                 historial={historial}
                 registeredClients={registeredClients}
+                facturasArca={facturasArca}
                 onToggleFacturado={handleToggleFacturado}
                 onDeleteItem={handleDeleteItem}
                 onResetClient={handleResetClient}
+                onSaveFacturaArca={handleSaveFacturaArca}
+                onDeleteFacturaArca={handleDeleteFacturaArca}
                 onRefresh={() => fetchExtractos(user)}
               />
             )}
@@ -436,6 +498,7 @@ export function App() {
             {activeTab === 'historial' && (
               <LedgerHistory
                 historial={historial}
+                facturasArca={facturasArca}
                 onSelectHistorialItem={(_item) => {
                   setActiveTab('factura_manual');
                 }}

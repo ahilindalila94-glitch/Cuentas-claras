@@ -1,6 +1,6 @@
 {
   "name": "Cuentas Claras - Asistente Contable",
-  "description": "Sistema contable de carga manual de comprobantes, cupones POS y cierres de lote, con panel de administración y conciliación impositiva global para la contadora.",
+  "description": "Sistema contable de carga manual de comprobantes, cupones POS y cierres de lote, con emisión y subida de facturas oficiales ARCA en PDF para descarga automática del cliente y panel de administración para contadora.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
