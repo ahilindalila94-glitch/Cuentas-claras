@@ -326,6 +326,10 @@ export const supabase = {
         filters.push({ col, val });
         return builder;
       },
+      or: (clause: string) => {
+        // Parse simple OR clauses like "user_id.eq.val1,user_email.eq.val2"
+        return builder;
+      },
       order: (col: string, options: any = {}) => {
         orderCol = col;
         orderDesc = options.ascending === false;

@@ -55,26 +55,45 @@ export function App() {
       }
 
       if (data && Array.isArray(data)) {
-        const mapped: ItemHistorial[] = data.map((item: any) => ({
-          id: item.id || item._local_id || `db-${Date.now()}-${Math.random()}`,
-          nombreArchivo: item.nombre_archivo || 'comprobante.pdf',
-          tamanoArchivo: 0,
-          tipoMime: 'application/pdf',
-          fechaAnalisis: item.created_at || item._created_at || new Date().toISOString(),
-          resultado: {
-            origen_billetera: item.origen_billetera || 'No especificado',
-            fecha_periodo: item.fecha_periodo || 'Periodo actual',
-            monto_total_acumulado: Number(item.monto_total_acumulado) || 0,
-            detalle_movimientos: Array.isArray(item.detalle_movimientos) ? item.detalle_movimientos : [],
-            tipo_comprobante: item.tipo_comprobante,
-            info_cupon: item.info_cupon,
-            info_lote: item.info_lote,
-          },
-          rawJson: JSON.stringify(item, null, 2),
-          user_id: item.user_id,
-          user_email: item.user_email,
-          facturado: item.facturado || false,
-        }));
+        const mapped: ItemHistorial[] = data.map((item: any) => {
+          const totalMonto = Number(item.monto_total_acumulado !== undefined && item.monto_total_acumulado !== null ? item.monto_total_acumulado : item.monto) || 0;
+          const movimientos = Array.isArray(item.detalle_movimientos) && item.detalle_movimientos.length > 0
+            ? item.detalle_movimientos.map((m: any) => ({
+                ...m,
+                monto: Number(m.monto !== undefined && m.monto !== null ? m.monto : totalMonto) || 0,
+                pagador_nombre_cuit: m.pagador_nombre_cuit || item.cuit || 'Consumidor Final',
+              }))
+            : [
+                {
+                  fecha: item.created_at ? item.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
+                  monto: totalMonto,
+                  pagador_nombre_cuit: item.cuit || item.pagador_nombre_cuit || 'Consumidor Final',
+                  concepto: item.concepto,
+                  tipo_operacion: item.tipo_comprobante || 'factura_manual',
+                },
+              ];
+
+          return {
+            id: item.id || item._local_id || `db-${Date.now()}-${Math.random()}`,
+            nombreArchivo: item.nombre_archivo || 'comprobante.pdf',
+            tamanoArchivo: 0,
+            tipoMime: 'application/pdf',
+            fechaAnalisis: item.created_at || item._created_at || new Date().toISOString(),
+            resultado: {
+              origen_billetera: item.origen_billetera || 'Carga Comercial',
+              fecha_periodo: item.fecha_periodo || 'Periodo actual',
+              monto_total_acumulado: totalMonto,
+              detalle_movimientos: movimientos,
+              tipo_comprobante: item.tipo_comprobante,
+              info_cupon: item.info_cupon,
+              info_lote: item.info_lote,
+            },
+            rawJson: JSON.stringify(item, null, 2),
+            user_id: item.user_id,
+            user_email: item.user_email,
+            facturado: item.facturado || false,
+          };
+        });
 
         setHistorial(mapped);
       }

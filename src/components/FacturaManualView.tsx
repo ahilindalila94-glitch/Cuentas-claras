@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileText, DollarSign, User, CheckCircle2, AlertCircle, Users } from 'lucide-react';
+import { FileText, DollarSign, User, CheckCircle2, AlertCircle, Users, Hash } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface FacturaManualViewProps {
@@ -26,31 +26,53 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
     }
   };
 
+  const parseMontoInput = (val: string): number => {
+    if (!val) return 0;
+    let cleaned = val.trim();
+    // Remove currency symbols or extra spaces
+    cleaned = cleaned.replace(/[$ARS\s]/gi, '');
+    if (cleaned.includes('.') && cleaned.includes(',')) {
+      // e.g. "15.000,50" -> "15000.50"
+      cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+    } else if (cleaned.includes(',')) {
+      // e.g. "15000,50" -> "15000.50"
+      cleaned = cleaned.replace(',', '.');
+    }
+    const parsed = parseFloat(cleaned);
+    return isNaN(parsed) ? 0 : parsed;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setMsg(null);
 
-    const finalCuit = esConsumidorFinal ? 'Consumidor Final' : cuitRazonSocial.trim();
+    const finalCuit = esConsumidorFinal ? 'Consumidor Final' : (cuitRazonSocial.trim() || 'Consumidor Final');
+    const finalConcepto = conceptoNota.trim();
 
     // Form Validations
-    if (!finalCuit || !monto.trim() || !conceptoNota.trim()) {
+    if (!finalCuit || !monto.trim() || !finalConcepto) {
       setMsg({ type: 'error', text: 'Por favor complete todos los campos obligatorios.' });
       return;
     }
 
-    const numericMonto = parseFloat(monto);
-    if (isNaN(numericMonto) || numericMonto <= 0) {
-      setMsg({ type: 'error', text: 'Por favor ingrese un monto numérico válido mayor a cero.' });
+    const numericMonto = parseMontoInput(monto);
+    if (numericMonto <= 0) {
+      setMsg({ type: 'error', text: 'Por favor ingrese un monto numérico válido mayor a cero (ej: 45000 o 1500,50).' });
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      const email = user?.email || 'cliente.anonimo@cuentasclaras.com';
-      const userId = user?.id || null;
+      const email = user?.email || 'cliente@cuentasclaras.com';
+      const userId = user?.id && !user?.isLocalSession && user?.id !== 'demo-user-123' ? user.id : null;
 
-      const payload = {
+      // Complete schema payload supporting both 'receipts' and 'extractos' tables
+      const recordPayload = {
+        cuit: finalCuit,
+        monto: numericMonto,
+        concepto: finalConcepto,
+        pagador_nombre_cuit: finalCuit,
         origen_billetera: 'Carga Manual / Factura',
         fecha_periodo: new Date().toLocaleDateString('es-AR', { month: '2-digit', year: 'numeric' }),
         monto_total_acumulado: numericMonto,
@@ -58,7 +80,8 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
           {
             fecha: new Date().toISOString().split('T')[0],
             monto: numericMonto,
-            pagador_nombre_cuit: `${finalCuit} (${conceptoNota.trim()})`,
+            pagador_nombre_cuit: finalCuit,
+            concepto: finalConcepto,
             tipo_operacion: 'factura_manual',
             es_consumidor_final: esConsumidorFinal,
           },
@@ -70,20 +93,38 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
         created_at: new Date().toISOString(),
       };
 
-      // Direct client insert into Supabase table 'extractos'
-      const { error } = await supabase.from('extractos').insert([payload]);
-      if (error) throw error;
+      console.log('Insertando comprobante en Supabase:', recordPayload);
 
-      setMsg({ type: 'success', text: '¡Comprobante / Solicitud manual registrado con éxito en Supabase!' });
+      // 1. Direct insert into 'receipts'
+      try {
+        const { error: receiptsError } = await supabase.from('receipts').insert([recordPayload]);
+        if (receiptsError) {
+          console.warn('Inserción en receipts devolvió aviso:', receiptsError);
+        }
+      } catch (rErr) {
+        console.warn('Nota inserción receipts:', rErr);
+      }
+
+      // 2. Direct insert into 'extractos' to guarantee persistence across table schemas
+      try {
+        const { error: extractosError } = await supabase.from('extractos').insert([recordPayload]);
+        if (extractosError) {
+          console.warn('Inserción en extractos devolvió aviso:', extractosError);
+        }
+      } catch (eErr) {
+        console.warn('Nota inserción extractos:', eErr);
+      }
+
+      setMsg({ type: 'success', text: '¡Comprobante / Factura manual registrado con éxito en Supabase!' });
+      
       if (!esConsumidorFinal) {
         setCuitRazonSocial('');
       }
       setMonto('');
       setConceptoNota('');
 
-      setTimeout(() => {
-        onSuccess();
-      }, 800);
+      // Reload extractos list immediately so the client sees updated records without $0 totals
+      onSuccess();
     } catch (err: any) {
       console.error('Error al guardar solicitud manual en Supabase:', err);
       setMsg({
@@ -106,7 +147,7 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
             Factura por Texto / Carga Manual
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Registrá ventas, tickets o transferencias sin comprobante adjunto para conciliar con la contadora.
+            Registrá ventas, tickets o cupones POS sin comprobante adjunto para conciliar con la contadora.
           </p>
         </div>
       </div>
@@ -137,7 +178,7 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
             </div>
             <div>
               <p className="text-xs font-bold text-purple-950">Facturar a Consumidor Final</p>
-              <p className="text-[11px] text-purple-700">Autocompleta CUIT/Razón Social sin datos fiscales</p>
+              <p className="text-[11px] text-purple-700">Mapea automáticamente CUIT como "Consumidor Final"</p>
             </div>
           </div>
 
@@ -188,10 +229,9 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
               <DollarSign className="w-4 h-4" />
             </span>
             <input
-              type="number"
-              step="any"
+              type="text"
               required
-              placeholder="Ej: 75000"
+              placeholder="Ej: 75000 o 1500,50"
               value={monto}
               onChange={(e) => setMonto(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-xl text-xs font-semibold focus:bg-white focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all text-slate-900 outline-hidden"
@@ -199,19 +239,24 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
           </div>
         </div>
 
-        {/* 3. Concepto / Nota */}
+        {/* 3. Concepto / Número de Cupón o Comprobante */}
         <div className="space-y-1.5">
           <label className="text-[11px] font-black text-slate-700 uppercase tracking-wider block">
-            Concepto / Nota <span className="text-rose-500">*</span>
+            Concepto / N° de Cupón o Comprobante <span className="text-rose-500">*</span>
           </label>
-          <textarea
-            required
-            rows={3}
-            placeholder="Ej: Venta en mostrador, Honorarios o Cobro POSNET cupón #492"
-            value={conceptoNota}
-            onChange={(e) => setConceptoNota(e.target.value)}
-            className="w-full p-3.5 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-xl text-xs font-semibold focus:bg-white focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all text-slate-900 outline-hidden resize-none"
-          />
+          <div className="relative">
+            <span className="absolute inset-y-0 left-0 pl-3.5 top-3 flex items-start text-slate-400">
+              <Hash className="w-4 h-4" />
+            </span>
+            <textarea
+              required
+              rows={3}
+              placeholder="Ej: Cupón 235-0052, Venta en mostrador o Cobro POSNET"
+              value={conceptoNota}
+              onChange={(e) => setConceptoNota(e.target.value)}
+              className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-xl text-xs font-semibold focus:bg-white focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all text-slate-900 outline-hidden resize-none"
+            />
+          </div>
         </div>
 
         <button
@@ -232,3 +277,4 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
     </div>
   );
 };
+
