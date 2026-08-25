@@ -8,7 +8,8 @@ import {
   Clipboard,
   FileUp,
   Image as ImageIcon,
-  LogIn
+  LogIn,
+  FileText
 } from 'lucide-react';
 
 interface UploadZoneProps {
@@ -17,6 +18,7 @@ interface UploadZoneProps {
   isProcessing: boolean;
   user?: any;
   onGoToAuth?: () => void;
+  onGoToManual?: () => void;
 }
 
 export const UploadZone: React.FC<UploadZoneProps> = ({
@@ -25,6 +27,7 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
   isProcessing,
   user,
   onGoToAuth,
+  onGoToManual,
 }) => {
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -81,10 +84,14 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
   };
 
   const handleSubmit = async () => {
-    if (activeInputMode === 'archivo' && selectedFile) {
-      await onFileSelected(selectedFile);
-    } else if (activeInputMode === 'texto' && rawText.trim()) {
-      await onTextSubmitted(rawText.trim());
+    try {
+      if (activeInputMode === 'archivo' && selectedFile) {
+        await onFileSelected(selectedFile);
+      } else if (activeInputMode === 'texto' && rawText.trim()) {
+        await onTextSubmitted(rawText.trim());
+      }
+    } catch (err) {
+      console.error('Error al enviar comprobante:', err);
     }
   };
 
@@ -232,7 +239,7 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
                     type="button"
                     onClick={handleRemoveFile}
                     disabled={isProcessing}
-                    className="p-2 text-slate-400 hover:text-rose-500 rounded-xl hover:bg-white border border-transparent hover:border-slate-200 transition-colors"
+                    className="p-2 text-slate-400 hover:text-rose-500 rounded-xl hover:bg-white border border-transparent hover:border-slate-200 transition-colors cursor-pointer"
                     title="Remover archivo"
                   >
                     <X className="w-5 h-5" />
@@ -252,7 +259,7 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
                     ) : (
                       <>
                         <Sparkles className="w-4 h-4" />
-                        <span>Extraer Ingresos y Guardar</span>
+                        <span>Extraer Ingresos y JSON</span>
                       </>
                     )}
                   </button>
@@ -274,12 +281,23 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
               className="w-full text-xs p-3.5 rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 font-mono bg-slate-50/50 text-slate-900"
             />
 
-            <div className="flex justify-end">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              {onGoToManual && (
+                <button
+                  type="button"
+                  onClick={onGoToManual}
+                  className="text-xs text-purple-600 hover:text-purple-700 font-semibold flex items-center gap-1.5"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  ¿Preferís cargar los datos campo por campo? Ir a Carga Manual
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={handleSubmit}
                 disabled={isProcessing || !rawText.trim()}
-                className="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-300 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-2 transition-all cursor-pointer"
+                className="ml-auto px-5 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-300 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-2 transition-all cursor-pointer"
               >
                 {isProcessing ? (
                   <>
@@ -289,7 +307,7 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4" />
-                    <span>Analizar Texto y Guardar</span>
+                    <span>Extraer Ingresos y JSON</span>
                   </>
                 )}
               </button>

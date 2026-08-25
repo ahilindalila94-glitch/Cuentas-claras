@@ -77,15 +77,34 @@ Devuelve ÚNICAMENTE el objeto JSON estricto estructurado según el schema espec
 
       const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
 
-      if (fileData && mimeType) {
-        // Clean base64 header if present (e.g. data:image/png;base64,...)
-        const cleanBase64 = fileData.includes("base64,")
-          ? fileData.split("base64,")[1]
-          : fileData;
+      // Clean and normalize MIME type and base64 payload
+      if (fileData) {
+        let cleanMimeType = mimeType || "image/jpeg";
+        let cleanBase64 = String(fileData);
+
+        if (cleanBase64.includes(";base64,")) {
+          const splitHeader = cleanBase64.split(";base64,");
+          cleanBase64 = splitHeader[1];
+          if (splitHeader[0].startsWith("data:")) {
+            cleanMimeType = splitHeader[0].replace("data:", "");
+          }
+        } else if (cleanBase64.includes("base64,")) {
+          cleanBase64 = cleanBase64.split("base64,")[1];
+        }
+
+        // Normalize mime type for Gemini
+        if (cleanMimeType === "image/jpg") cleanMimeType = "image/jpeg";
+        if (fileName && fileName.toLowerCase().endsWith(".pdf")) cleanMimeType = "application/pdf";
+        if (fileName && (fileName.toLowerCase().endsWith(".jpg") || fileName.toLowerCase().endsWith(".jpeg"))) cleanMimeType = "image/jpeg";
+        if (fileName && fileName.toLowerCase().endsWith(".png")) cleanMimeType = "image/png";
+        if (fileName && fileName.toLowerCase().endsWith(".webp")) cleanMimeType = "image/webp";
+
+        // Remove any whitespaces/newlines from base64 string
+        cleanBase64 = cleanBase64.replace(/\s+/g, "");
 
         parts.push({
           inlineData: {
-            mimeType: mimeType,
+            mimeType: cleanMimeType,
             data: cleanBase64,
           },
         });
@@ -99,7 +118,7 @@ Extrae todas las transferencias recibidas e ingresos y genera la respuesta JSON 
         text: promptText,
       });
 
-      const modelsToTry = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
+      const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
       let response;
       let lastError;
 
@@ -178,7 +197,20 @@ Extrae todas las transferencias recibidas e ingresos y genera la respuesta JSON 
       }
 
       const responseText = response.text || "{}";
-      const parsedJson = JSON.parse(responseText);
+      let cleanJson = responseText.trim();
+      if (cleanJson.startsWith("```json")) {
+        cleanJson = cleanJson.replace(/^```json/, "").replace(/```$/, "").trim();
+      } else if (cleanJson.startsWith("```")) {
+        cleanJson = cleanJson.replace(/^```/, "").replace(/```$/, "").trim();
+      }
+      
+      let parsedJson;
+      try {
+        parsedJson = JSON.parse(cleanJson);
+      } catch (parseErr) {
+        console.error("Error parseando respuesta JSON de Gemini:", responseText);
+        throw new Error("No se pudo interpretar el formato devuelto por el modelo.");
+      }
 
       // Return the parsed JSON directly as requested
       return res.json(parsedJson);

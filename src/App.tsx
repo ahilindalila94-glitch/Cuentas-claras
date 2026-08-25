@@ -9,7 +9,7 @@ import { AdminPanel } from './components/AdminPanel';
 import { FacturaManualView } from './components/FacturaManualView';
 import { ComprobanteResultado, ItemHistorial, UserRole } from './types';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, X } from 'lucide-react';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<'analizador' | 'historial' | 'presets' | 'auth' | 'panel_control' | 'factura_manual'>('analizador');
@@ -231,9 +231,16 @@ export function App() {
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        if (typeof result === 'string') {
+          resolve(result);
+        } else {
+          reject(new Error('No se pudo convertir el archivo a Base64.'));
+        }
+      };
+      reader.onerror = () => reject(new Error('Error al leer el archivo seleccionado.'));
       reader.readAsDataURL(file);
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = (error) => reject(error);
     });
   };
 
@@ -244,12 +251,22 @@ export function App() {
     setCurrentFileName(file.name);
 
     try {
+      let mimeType = file.type;
+      const lowerName = file.name.toLowerCase();
+      if (!mimeType || mimeType === '') {
+        if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) mimeType = 'image/jpeg';
+        else if (lowerName.endsWith('.png')) mimeType = 'image/png';
+        else if (lowerName.endsWith('.webp')) mimeType = 'image/webp';
+        else if (lowerName.endsWith('.pdf')) mimeType = 'application/pdf';
+        else mimeType = 'image/jpeg';
+      }
+
       let requestBody: any = {
         fileName: file.name,
-        mimeType: file.type || 'application/octet-stream',
+        mimeType: mimeType,
       };
 
-      if (file.type.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.csv')) {
+      if (mimeType.startsWith('text/') || lowerName.endsWith('.txt') || lowerName.endsWith('.csv')) {
         const text = await file.text();
         requestBody.rawText = text;
       } else {
@@ -268,14 +285,14 @@ export function App() {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(
-          errorData.details || errorData.error || `Error del servidor: HTTP ${response.status}`
+          errorData.details || errorData.error || `Error en el servidor (HTTP ${response.status})`
         );
       }
 
       const extracted: ComprobanteResultado = await response.json();
 
       if (!extracted || typeof extracted.monto_total_acumulado === 'undefined') {
-        throw new Error('La respuesta de la IA no contiene el formato esperado.');
+        throw new Error('El modelo de IA no devolvió los datos en el formato esperado.');
       }
 
       setResultadoActual(extracted);
@@ -312,9 +329,9 @@ export function App() {
         });
       }
     } catch (err: any) {
-      console.error('Error al analizar archivo:', err);
+      console.error('Error al analizar imagen/archivo con IA:', err);
       setAnalysisError(
-        err?.message || 'Ocurrió un error inesperado al procesar el archivo con Gemini 3.7.'
+        `Error al procesar la imagen con IA: ${err?.message || 'No se pudo extraer la información del comprobante.'}`
       );
     } finally {
       setIsProcessing(false);
@@ -343,14 +360,14 @@ export function App() {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(
-          errorData.details || errorData.error || `Error del servidor: HTTP ${response.status}`
+          errorData.details || errorData.error || `Error en el servidor (HTTP ${response.status})`
         );
       }
 
       const extracted: ComprobanteResultado = await response.json();
 
       if (!extracted || typeof extracted.monto_total_acumulado === 'undefined') {
-        throw new Error('La respuesta de la IA no contiene el formato esperado.');
+        throw new Error('El modelo de IA no devolvió los datos en el formato esperado.');
       }
 
       setResultadoActual(extracted);
@@ -377,7 +394,7 @@ export function App() {
           fecha_periodo: extracted.fecha_periodo,
           monto_total_acumulado: Number(extracted.monto_total_acumulado),
           detalle_movimientos: extracted.detalle_movimientos,
-          nombre_archivo: 'Texto Comprobante / Extracto',
+          nombre_archivo: 'Carga por Texto',
           user_id: (user.id === 'demo-user-123' || user.isLocalSession) ? null : user.id,
           user_email: user.email,
           facturado: false
@@ -387,9 +404,9 @@ export function App() {
         });
       }
     } catch (err: any) {
-      console.error('Error al analizar texto:', err);
+      console.error('Error al analizar texto con IA:', err);
       setAnalysisError(
-        err?.message || 'Ocurrió un error inesperado al procesar el texto con Gemini 3.7.'
+        `Error al procesar el texto con IA: ${err?.message || 'No se pudo analizar el contenido.'}`
       );
     } finally {
       setIsProcessing(false);
@@ -494,15 +511,38 @@ export function App() {
                   isProcessing={isProcessing}
                   user={user}
                   onGoToAuth={() => setActiveTab('auth')}
+                  onGoToManual={() => setActiveTab('factura_manual')}
                 />
 
-                {/* Error Banner */}
+                {/* Error Banner with Alternative Action Fallbacks */}
                 {analysisError && (
-                  <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-3 text-rose-800 animate-in fade-in duration-200 shadow-xs">
-                    <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-                    <div className="space-y-1">
-                      <h4 className="text-xs font-bold uppercase tracking-wider">Error en la Extracción</h4>
-                      <p className="text-xs">{analysisError}</p>
+                  <div className="p-4.5 bg-rose-50 border border-rose-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-rose-800 animate-in fade-in duration-200 shadow-xs">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-rose-900">
+                          Error al procesar la imagen con IA
+                        </h4>
+                        <p className="text-xs text-rose-700 leading-relaxed">{analysisError}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 shrink-0 self-end sm:self-center">
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('factura_manual')}
+                        className="px-3 py-1.5 bg-white hover:bg-rose-100 text-rose-900 border border-rose-300 rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer"
+                      >
+                        Facturar por Texto / Manual
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAnalysisError(null)}
+                        className="p-1.5 text-rose-500 hover:text-rose-800 rounded-lg hover:bg-rose-100 transition-colors"
+                        title="Descartar aviso"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
                 )}
