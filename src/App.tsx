@@ -1,26 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Header } from './components/Header';
-import { UploadZone } from './components/UploadZone';
-import { ResultCard } from './components/ResultCard';
+import { Header, ActiveTabType } from './components/Header';
 import { LedgerHistory } from './components/LedgerHistory';
-import { PresetsView } from './components/PresetsView';
 import { AuthScreen } from './components/AuthScreen';
 import { AdminPanel } from './components/AdminPanel';
 import { FacturaManualView } from './components/FacturaManualView';
-import { ComprobanteResultado, ItemHistorial, UserRole, PresetSample } from './types';
+import { ItemHistorial, UserRole } from './types';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
-import { analyzeComprobanteWithAI } from './lib/aiAnalyzer';
-import { extractPdfData } from './lib/pdfHelper';
-import { AlertCircle, X } from 'lucide-react';
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<'analizador' | 'historial' | 'presets' | 'auth' | 'panel_control' | 'factura_manual'>('analizador');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [resultadoActual, setResultadoActual] = useState<ComprobanteResultado | null>(null);
-  const [currentFileName, setCurrentFileName] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<ActiveTabType>('factura_manual');
 
-  // Strict initial auth state: null (no auto-login, zero credentials on startup)
+  // Strict initial auth state: null (zero credentials on startup)
   const [user, setUser] = useState<any>(null);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
 
@@ -45,7 +35,7 @@ export function App() {
         // Global query for accountant: fetch ALL receipts without filtering by user_id
         console.log('Cargando registros globales de contadora (ahilindalila94@gmail.com)...');
 
-        // 1. Global query on receipts
+        // 1. Direct global query on receipts table
         try {
           const { data: receiptsData, error: rErr } = await supabase
             .from('receipts')
@@ -61,7 +51,7 @@ export function App() {
           console.warn('Excepción consultando receipts:', rCatch);
         }
 
-        // 2. Global query on extractos
+        // 2. Direct global query on extractos table
         try {
           const { data: extractosData, error: eErr } = await supabase
             .from('extractos')
@@ -128,6 +118,7 @@ export function App() {
                   ...m,
                   monto: Number(m.monto !== undefined && m.monto !== null ? m.monto : totalMonto) || 0,
                   pagador_nombre_cuit: m.pagador_nombre_cuit || item.cuit || 'Consumidor Final',
+                  concepto: m.concepto || item.concepto,
                 }))
               : [
                   {
@@ -141,12 +132,12 @@ export function App() {
 
           return {
             id: item.id || item._local_id || `db-${Date.now()}-${Math.random()}`,
-            nombreArchivo: item.nombre_archivo || 'comprobante.pdf',
+            nombreArchivo: item.nombre_archivo || 'Comprobante',
             tamanoArchivo: 0,
             tipoMime: 'application/pdf',
             fechaAnalisis: item.created_at || item._created_at || new Date().toISOString(),
             resultado: {
-              origen_billetera: item.origen_billetera || 'Carga Comercial',
+              origen_billetera: item.origen_billetera || 'Carga Manual',
               fecha_periodo: item.fecha_periodo || 'Periodo actual',
               monto_total_acumulado: totalMonto,
               detalle_movimientos: movimientos,
@@ -162,6 +153,8 @@ export function App() {
         });
 
         setHistorial(mapped);
+      } else {
+        setHistorial([]);
       }
     } catch (err) {
       console.error('Error general fetching extractos/receipts:', err);
@@ -190,6 +183,8 @@ export function App() {
             fetchExtractos(authenticatedUser);
             if (role === 'admin_contadora') {
               setActiveTab('panel_control');
+            } else {
+              setActiveTab('factura_manual');
             }
             return;
           }
@@ -212,6 +207,8 @@ export function App() {
             fetchExtractos(authenticatedUser);
             if (role === 'admin_contadora') {
               setActiveTab('panel_control');
+            } else {
+              setActiveTab('factura_manual');
             }
             return;
           } catch (e) {
@@ -222,10 +219,12 @@ export function App() {
         // If not logged in, state remains zero
         setUser(null);
         setHistorial([]);
+        setActiveTab('factura_manual');
       } catch (err) {
         console.warn('Auth init note:', err);
         setUser(null);
         setHistorial([]);
+        setActiveTab('factura_manual');
       } finally {
         setIsAuthLoading(false);
       }
@@ -246,19 +245,25 @@ export function App() {
         };
         setUser(authenticatedUser);
         fetchExtractos(authenticatedUser);
+        if (role === 'admin_contadora') {
+          setActiveTab('panel_control');
+        } else {
+          setActiveTab('factura_manual');
+        }
       } else if (!localStorage.getItem('local_supabase_session')) {
         setUser(null);
         setHistorial([]);
+        setActiveTab('factura_manual');
       }
     });
 
     // Real-time Supabase subscription for Contadora & clients
     try {
       activeChannel = supabase
-        .channel('public:extractos')
+        .channel('public:receipts_changes')
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'extractos' },
+          { event: '*', schema: 'public', table: 'receipts' },
           () => {
             if (user) {
               fetchExtractos(user);
@@ -287,8 +292,7 @@ export function App() {
     localStorage.removeItem('local_supabase_session');
     setUser(null);
     setHistorial([]);
-    setResultadoActual(null);
-    setActiveTab('analizador');
+    setActiveTab('factura_manual');
   };
 
   const handleAuthSuccess = (authenticatedUser: any) => {
@@ -305,7 +309,7 @@ export function App() {
     if (role === 'admin_contadora') {
       setActiveTab('panel_control');
     } else {
-      setActiveTab('analizador');
+      setActiveTab('factura_manual');
     }
   };
 
@@ -317,6 +321,7 @@ export function App() {
     );
 
     try {
+      await supabase.from('receipts').update({ facturado: nextStatus }).eq('id', id);
       await supabase.from('extractos').update({ facturado: nextStatus }).eq('id', id);
     } catch (err) {
       console.error('Error actualizando facturado en Supabase:', err);
@@ -327,6 +332,7 @@ export function App() {
   const handleDeleteItem = async (id: string) => {
     setHistorial((prev) => prev.filter((item) => item.id !== id));
     try {
+      await supabase.from('receipts').delete().eq('id', id);
       await supabase.from('extractos').delete().eq('id', id);
     } catch (e) {
       console.error('Error eliminando comprobante:', e);
@@ -337,220 +343,10 @@ export function App() {
   const handleResetClient = async (email: string) => {
     setHistorial((prev) => prev.filter((item) => item.user_email !== email));
     try {
+      await supabase.from('receipts').delete().eq('user_email', email);
       await supabase.from('extractos').delete().eq('user_email', email);
     } catch (e) {
       console.error('Error reseteando cliente:', e);
-    }
-  };
-
-  // Convert File to Base64
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result;
-        if (typeof result === 'string') {
-          resolve(result);
-        } else {
-          reject(new Error('No se pudo convertir el archivo a Base64.'));
-        }
-      };
-      reader.onerror = () => reject(new Error('Error al leer el archivo seleccionado.'));
-      reader.readAsDataURL(file);
-    });
-  };
-
-  // Analyze File with Vision AI
-  const handleAnalyzeFile = async (file: File) => {
-    setIsProcessing(true);
-    setAnalysisError(null);
-    setCurrentFileName(file.name);
-
-    try {
-      let mimeType = file.type;
-      const lowerName = file.name.toLowerCase();
-      if (!mimeType || mimeType === '') {
-        if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) mimeType = 'image/jpeg';
-        else if (lowerName.endsWith('.png')) mimeType = 'image/png';
-        else if (lowerName.endsWith('.webp')) mimeType = 'image/webp';
-        else if (lowerName.endsWith('.pdf')) mimeType = 'application/pdf';
-        else mimeType = 'image/jpeg';
-      }
-
-      let extracted: ComprobanteResultado;
-
-      if (mimeType === 'application/pdf' || lowerName.endsWith('.pdf')) {
-        // PDF Processing using pdfjs-dist
-        try {
-          console.log(`Extrayendo texto e imágenes de PDF: ${file.name} con pdfjs-dist...`);
-          const pdfData = await extractPdfData(file);
-          
-          extracted = await analyzeComprobanteWithAI({
-            fileData: pdfData.firstPageImageBase64 || (await fileToBase64(file)),
-            mimeType: pdfData.firstPageImageBase64 ? 'image/jpeg' : 'application/pdf',
-            rawText: pdfData.text,
-            fileName: file.name,
-          });
-        } catch (pdfErr: any) {
-          console.warn('Fallo en la lectura del PDF:', pdfErr);
-          const customMsg = pdfErr?.message || 'El archivo PDF está protegido o no se pudo interpretar.';
-          setAnalysisError(
-            `No se pudo leer el archivo PDF "${file.name}" (${customMsg}). Podés registrar la operación usando 'Carga Manual' o pegando el texto.`
-          );
-          setIsProcessing(false);
-          return;
-        }
-      } else if (mimeType.startsWith('text/') || lowerName.endsWith('.txt') || lowerName.endsWith('.csv')) {
-        const text = await file.text();
-        extracted = await analyzeComprobanteWithAI({
-          rawText: text,
-          fileName: file.name,
-          mimeType: 'text/plain',
-        });
-      } else {
-        const base64 = await fileToBase64(file);
-        extracted = await analyzeComprobanteWithAI({
-          fileData: base64,
-          mimeType: mimeType,
-          fileName: file.name,
-        });
-      }
-
-      if (!extracted || typeof extracted.monto_total_acumulado === 'undefined') {
-        throw new Error('El modelo de IA no devolvió los datos en el formato esperado.');
-      }
-
-      setResultadoActual(extracted);
-
-      const newItem: ItemHistorial = {
-        id: `item-${Date.now()}`,
-        nombreArchivo: file.name,
-        tamanoArchivo: file.size,
-        tipoMime: file.type || 'application/pdf',
-        fechaAnalisis: new Date().toISOString(),
-        resultado: extracted,
-        rawJson: JSON.stringify(extracted, null, 2),
-        user_id: user?.id || null,
-        user_email: user?.email || null,
-        facturado: false,
-      };
-
-      setHistorial((prev) => [newItem, ...prev]);
-
-      // Direct client-side insert into Supabase
-      if (user) {
-        const payload = {
-          origen_billetera: extracted.origen_billetera,
-          fecha_periodo: extracted.fecha_periodo,
-          monto_total_acumulado: Number(extracted.monto_total_acumulado),
-          monto: Number(extracted.monto_total_acumulado),
-          detalle_movimientos: extracted.detalle_movimientos,
-          nombre_archivo: file.name,
-          cuit: extracted.detalle_movimientos?.[0]?.pagador_nombre_cuit || 'Consumidor Final',
-          concepto: extracted.detalle_movimientos?.[0]?.concepto || `Comprobante ${extracted.origen_billetera}`,
-          user_id: user.id === 'demo-user-123' || user.isLocalSession ? null : user.id,
-          user_email: user.email,
-          facturado: false,
-          created_at: new Date().toISOString(),
-        };
-
-        // Insert into receipts first, fallback to extractos
-        supabase.from('receipts').insert([payload]).then(({ error }) => {
-          if (error) {
-            console.warn('Fallback insert a extractos:', error);
-            supabase.from('extractos').insert([payload]).catch((e) => console.warn('extractos insert note:', e));
-          }
-        }).catch(() => {
-          supabase.from('extractos').insert([payload]).catch((e) => console.warn('extractos fallback note:', e));
-        });
-      }
-    } catch (err: any) {
-      console.error('Error al analizar imagen/archivo con IA:', err);
-      setAnalysisError(
-        `Error al procesar el archivo con IA: ${err?.message || 'No se pudo extraer la información del comprobante.'}`
-      );
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // Analyze Text
-  const handleAnalyzeText = async (text: string) => {
-    setIsProcessing(true);
-    setAnalysisError(null);
-    setCurrentFileName('comprobante_texto.txt');
-
-    try {
-      const extracted = await analyzeComprobanteWithAI({
-        rawText: text,
-        fileName: 'texto_transferencia.txt',
-        mimeType: 'text/plain',
-      });
-
-      if (!extracted || typeof extracted.monto_total_acumulado === 'undefined') {
-        throw new Error('El modelo de IA no devolvió los datos en el formato esperado.');
-      }
-
-      setResultadoActual(extracted);
-
-      const newItem: ItemHistorial = {
-        id: `item-${Date.now()}`,
-        nombreArchivo: 'Texto Comprobante / Extracto',
-        tamanoArchivo: text.length,
-        tipoMime: 'text/plain',
-        fechaAnalisis: new Date().toISOString(),
-        resultado: extracted,
-        rawJson: JSON.stringify(extracted, null, 2),
-        user_id: user?.id || null,
-        user_email: user?.email || null,
-        facturado: false,
-      };
-
-      setHistorial((prev) => [newItem, ...prev]);
-
-      // Direct client insert into Supabase
-      if (user) {
-        const payload = {
-          origen_billetera: extracted.origen_billetera,
-          fecha_periodo: extracted.fecha_periodo,
-          monto_total_acumulado: Number(extracted.monto_total_acumulado),
-          monto: Number(extracted.monto_total_acumulado),
-          detalle_movimientos: extracted.detalle_movimientos,
-          nombre_archivo: 'Carga por Texto',
-          cuit: extracted.detalle_movimientos?.[0]?.pagador_nombre_cuit || 'Consumidor Final',
-          concepto: extracted.detalle_movimientos?.[0]?.concepto || `Texto ${extracted.origen_billetera}`,
-          user_id: user.id === 'demo-user-123' || user.isLocalSession ? null : user.id,
-          user_email: user.email,
-          facturado: false,
-          created_at: new Date().toISOString(),
-        };
-
-        supabase.from('receipts').insert([payload]).then(({ error }) => {
-          if (error) {
-            console.warn('Fallback insert a extractos:', error);
-            supabase.from('extractos').insert([payload]).catch((e) => console.warn('extractos insert note:', e));
-          }
-        }).catch(() => {
-          supabase.from('extractos').insert([payload]).catch((e) => console.warn('extractos fallback note:', e));
-        });
-      }
-    } catch (err: any) {
-      console.error('Error al analizar texto con IA:', err);
-      setAnalysisError(
-        `Error al procesar el texto con IA: ${err?.message || 'No se pudo analizar el contenido.'}`
-      );
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleSelectPreset = (preset: PresetSample) => {
-    setActiveTab('analizador');
-    if (preset.datosEjemplo.texto) {
-      handleAnalyzeText(preset.datosEjemplo.texto);
-    } else {
-      setResultadoActual(preset.datosEjemplo.resultadoSimulado);
-      setCurrentFileName(`Ejemplo_${preset.entidad}.txt`);
     }
   };
 
@@ -581,7 +377,10 @@ export function App() {
         ) : (
           <>
             {activeTab === 'auth' && (
-              <AuthScreen onAuthSuccess={handleAuthSuccess} onCancel={() => setActiveTab('analizador')} />
+              <AuthScreen 
+                onAuthSuccess={handleAuthSuccess} 
+                onCancel={() => setActiveTab(user?.role === 'admin_contadora' ? 'panel_control' : 'factura_manual')} 
+              />
             )}
 
             {activeTab === 'factura_manual' && (
@@ -594,86 +393,26 @@ export function App() {
               />
             )}
 
-            {activeTab === 'panel_control' && user?.role === 'admin_contadora' && (
+            {activeTab === 'panel_control' && (
               <AdminPanel
                 historial={historial}
                 onToggleFacturado={handleToggleFacturado}
                 onDeleteItem={handleDeleteItem}
                 onResetClient={handleResetClient}
+                onRefresh={() => fetchExtractos(user)}
               />
-            )}
-
-            {activeTab === 'analizador' && (
-              <div className="space-y-6">
-                <UploadZone
-                  onFileSelected={handleAnalyzeFile}
-                  onTextSubmitted={handleAnalyzeText}
-                  isProcessing={isProcessing}
-                  user={user}
-                  onGoToAuth={() => setActiveTab('auth')}
-                  onGoToManual={() => setActiveTab('factura_manual')}
-                />
-
-                {/* Error Banner with Alternative Action Fallbacks */}
-                {analysisError && (
-                  <div className="p-4.5 bg-rose-50 border border-rose-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-rose-800 animate-in fade-in duration-200 shadow-xs">
-                    <div className="flex items-start gap-3">
-                      <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-                      <div className="space-y-1">
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-rose-900">
-                          Error al procesar el comprobante
-                        </h4>
-                        <p className="text-xs text-rose-700 leading-relaxed">{analysisError}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 shrink-0 self-end sm:self-center">
-                      <button
-                        type="button"
-                        onClick={() => setActiveTab('factura_manual')}
-                        className="px-3 py-1.5 bg-white hover:bg-rose-100 text-rose-900 border border-rose-300 rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer"
-                      >
-                        Facturar por Texto / Manual
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setAnalysisError(null)}
-                        className="p-1.5 text-rose-500 hover:text-rose-800 rounded-lg hover:bg-rose-100 transition-colors"
-                        title="Descartar aviso"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Results Section */}
-                {resultadoActual && (
-                  <ResultCard
-                    resultado={resultadoActual}
-                    fileName={currentFileName}
-                    onUpdateResultado={setResultadoActual}
-                    user={user}
-                    onGoToAuth={() => setActiveTab('auth')}
-                  />
-                )}
-              </div>
             )}
 
             {activeTab === 'historial' && (
               <LedgerHistory
                 historial={historial}
-                onSelectHistorialItem={(item) => {
-                  setResultadoActual(item.resultado);
-                  setCurrentFileName(item.nombreArchivo);
-                  setActiveTab('analizador');
+                onSelectHistorialItem={(_item) => {
+                  setActiveTab('factura_manual');
                 }}
                 onDeleteItem={handleDeleteItem}
                 onClearAll={handleClearHistorial}
               />
             )}
-
-            {activeTab === 'presets' && <PresetsView onSelectPreset={handleSelectPreset} />}
           </>
         )}
       </main>
@@ -681,13 +420,13 @@ export function App() {
       {/* Footer */}
       <footer className="border-t border-slate-200/80 bg-white py-6 mt-12 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p>© {new Date().getFullYear()} Cuentas Claras • Estudio Contable & Conciliación Impositiva</p>
+          <p>© {new Date().getFullYear()} Cuentas Claras • Estudio Contable Ahilin Torres & Conciliación Impositiva</p>
           <div className="flex items-center gap-4 text-slate-400">
             <span>Payway & POSNET</span>
             <span>•</span>
-            <span>Mercado Pago & Bancos</span>
+            <span>Facturación AFIP / ARCA</span>
             <span>•</span>
-            <span>AFIP / ARCA</span>
+            <span>Comprobantes Directos</span>
           </div>
         </div>
       </footer>

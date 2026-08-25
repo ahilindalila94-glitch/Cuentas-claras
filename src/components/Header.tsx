@@ -1,23 +1,24 @@
 import React, { useState } from 'react';
 import { 
-  Calculator, 
   Sparkles, 
   FileSpreadsheet, 
-  Layers, 
   User, 
   LogOut, 
   Briefcase, 
   Menu, 
-  X 
+  X,
+  Receipt
 } from 'lucide-react';
 import { Logo } from './Logo';
 
+export type ActiveTabType = 'factura_manual' | 'historial' | 'auth' | 'panel_control';
+
 interface HeaderProps {
   historialCount: number;
-  totalAcumuladoHistorial: number;
+  totalAcumuladoHistorial?: number;
   onClearHistorial?: () => void;
-  activeTab: 'analizador' | 'historial' | 'presets' | 'auth' | 'panel_control' | 'factura_manual';
-  setActiveTab: (tab: 'analizador' | 'historial' | 'presets' | 'auth' | 'panel_control' | 'factura_manual') => void;
+  activeTab: ActiveTabType;
+  setActiveTab: (tab: ActiveTabType) => void;
   user: any;
   onLogout: () => void;
 }
@@ -32,9 +33,11 @@ export const Header: React.FC<HeaderProps> = ({
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   
   // Strictly verify that only ahilindalila94@gmail.com with admin_contadora role can see the admin panel
-  const isContadora = user?.role === 'admin_contadora' && user?.email?.trim().toLowerCase() === 'ahilindalila94@gmail.com';
+  const isContadora = 
+    user?.role === 'admin_contadora' || 
+    user?.email?.trim().toLowerCase() === 'ahilindalila94@gmail.com';
 
-  const handleTabClick = (tab: 'analizador' | 'historial' | 'presets' | 'auth' | 'panel_control' | 'factura_manual') => {
+  const handleTabClick = (tab: ActiveTabType) => {
     setActiveTab(tab);
     setIsMobileMenuOpen(false);
   };
@@ -56,7 +59,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <h1 className="text-sm sm:text-base md:text-lg font-black tracking-tight text-white flex items-center gap-1.5 whitespace-nowrap">
                   Cuentas Claras
                   <span className="inline-flex items-center gap-1 text-[9px] sm:text-[10px] font-medium bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full border border-purple-500/20">
-                    <Sparkles className="w-2.5 h-2.5 sm:w-3 sm:h-3 animate-pulse text-purple-400" /> Studio 3.7
+                    <Sparkles className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-purple-400" /> Sistema Contable
                   </span>
                 </h1>
               </div>
@@ -66,7 +69,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* DESKTOP NAVIGATION (Visible on md and up, >= 768px) */}
+          {/* DESKTOP NAVIGATION */}
           <div className="hidden md:flex items-center gap-4">
             <nav className="flex items-center bg-slate-800/80 p-1 rounded-xl border border-slate-700/60 gap-1">
               
@@ -74,6 +77,7 @@ export const Header: React.FC<HeaderProps> = ({
               {isContadora && (
                 <button
                   id="tab-panel_control"
+                  type="button"
                   onClick={() => handleTabClick('panel_control')}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
                     activeTab === 'panel_control'
@@ -82,57 +86,29 @@ export const Header: React.FC<HeaderProps> = ({
                   }`}
                 >
                   <Briefcase className="w-3.5 h-3.5" />
-                  <span>Panel Clientes</span>
+                  <span>Panel Contadora</span>
                 </button>
               )}
 
-              {/* Cliente Upload Tabs */}
-              {!isContadora && (
-                <>
-                  <button
-                    id="tab-analizador"
-                    onClick={() => handleTabClick('analizador')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                      activeTab === 'analizador'
-                        ? 'bg-purple-600 text-white shadow-xs'
-                        : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
-                    }`}
-                  >
-                    <Calculator className="w-3.5 h-3.5" />
-                    <span>Analizador</span>
-                  </button>
-                  
-                  <button
-                    id="tab-factura_manual"
-                    onClick={() => handleTabClick('factura_manual')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                      activeTab === 'factura_manual'
-                        ? 'bg-purple-600 text-white shadow-xs'
-                        : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
-                    }`}
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-purple-300" />
-                    <span>Facturar por Texto/Manual</span>
-                  </button>
-
-                  <button
-                    id="tab-presets"
-                    onClick={() => handleTabClick('presets')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                      activeTab === 'presets'
-                        ? 'bg-purple-600 text-white shadow-xs'
-                        : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
-                    }`}
-                  >
-                    <Layers className="w-3.5 h-3.5" />
-                    <span>Ejemplos</span>
-                  </button>
-                </>
-              )}
+              {/* Main Carga Manual Module */}
+              <button
+                id="tab-factura_manual"
+                type="button"
+                onClick={() => handleTabClick('factura_manual')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                  activeTab === 'factura_manual'
+                    ? 'bg-purple-600 text-white shadow-xs'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
+                }`}
+              >
+                <Receipt className="w-3.5 h-3.5 text-purple-300" />
+                <span>Cargar Comprobantes</span>
+              </button>
 
               {/* Shared Historial Tab */}
               <button
                 id="tab-historial"
+                type="button"
                 onClick={() => handleTabClick('historial')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
                   activeTab === 'historial'
@@ -141,7 +117,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}
               >
                 <FileSpreadsheet className="w-3.5 h-3.5" />
-                <span>{isContadora ? 'Todos los Libros' : 'Mis Extractos'}</span>
+                <span>{isContadora ? 'Todos los Comprobantes' : 'Mis Comprobantes'}</span>
                 {historialCount > 0 && (
                   <span className="font-black text-[9px] px-1.5 py-0.2 rounded-full bg-purple-500 text-white">
                     {historialCount}
@@ -152,6 +128,7 @@ export const Header: React.FC<HeaderProps> = ({
               {/* User Identity / Auth Tab */}
               <button
                 id="tab-auth"
+                type="button"
                 onClick={() => handleTabClick('auth')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
                   activeTab === 'auth'
@@ -172,6 +149,7 @@ export const Header: React.FC<HeaderProps> = ({
             {/* Logout Button on Desktop */}
             {user && (
               <button
+                type="button"
                 onClick={onLogout}
                 className="p-2 bg-slate-800 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 rounded-xl transition-all border border-slate-700/50 flex items-center justify-center shrink-0 cursor-pointer"
                 title="Cerrar Sesión"
@@ -181,9 +159,10 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </div>
 
-          {/* HAMBURGER TOGGLE BUTTON (Visible only on mobile/tablet, < 768px) */}
+          {/* HAMBURGER TOGGLE BUTTON (Mobile/Tablet) */}
           <div className="md:hidden flex items-center">
             <button
+              type="button"
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               className="p-2.5 rounded-xl bg-slate-800 text-slate-200 hover:bg-slate-700 hover:text-white active:scale-95 transition-all border border-slate-700/50 cursor-pointer"
               aria-label="Alternar menú de navegación"
@@ -198,7 +177,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         </div>
 
-        {/* MOBILE COLLAPSIBLE DROPDOWN MENU (Visible only on < 768px when open) */}
+        {/* MOBILE COLLAPSIBLE DROPDOWN MENU */}
         {isMobileMenuOpen && (
           <div className="md:hidden pb-5 pt-1 border-t border-slate-800 w-full animate-in fade-in slide-in-from-top-3 duration-200">
             <nav className="flex flex-col gap-2 bg-slate-950/60 p-3 rounded-2xl border border-slate-850/60 w-full box-border">
@@ -206,6 +185,7 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Contadora Admin Tab */}
               {isContadora && (
                 <button
+                  type="button"
                   onClick={() => handleTabClick('panel_control')}
                   className={`w-full py-3 px-4 rounded-xl text-xs font-black flex items-center gap-3 transition-all cursor-pointer ${
                     activeTab === 'panel_control'
@@ -214,53 +194,25 @@ export const Header: React.FC<HeaderProps> = ({
                   }`}
                 >
                   <Briefcase className="w-4 h-4 text-purple-400" />
-                  <span>Panel Clientes</span>
+                  <span>Panel Contadora</span>
                 </button>
               )}
 
-              {/* Cliente Upload Tabs */}
-              {!isContadora && (
-                <>
-                  <button
-                    onClick={() => handleTabClick('analizador')}
-                    className={`w-full py-3 px-4 rounded-xl text-xs font-black flex items-center gap-3 transition-all cursor-pointer ${
-                      activeTab === 'analizador'
-                        ? 'bg-purple-600 text-white shadow-md'
-                        : 'text-slate-300 bg-slate-900/50 hover:bg-slate-850'
-                    }`}
-                  >
-                    <Calculator className="w-4 h-4 text-purple-400" />
-                    <span>Analizador</span>
-                  </button>
-
-                  <button
-                    onClick={() => handleTabClick('factura_manual')}
-                    className={`w-full py-3 px-4 rounded-xl text-xs font-black flex items-center gap-3 transition-all cursor-pointer ${
-                      activeTab === 'factura_manual'
-                        ? 'bg-purple-600 text-white shadow-md'
-                        : 'text-slate-300 bg-slate-900/50 hover:bg-slate-850'
-                    }`}
-                  >
-                    <Sparkles className="w-4 h-4 text-purple-300" />
-                    <span>Facturar por Texto/Manual</span>
-                  </button>
-
-                  <button
-                    onClick={() => handleTabClick('presets')}
-                    className={`w-full py-3 px-4 rounded-xl text-xs font-black flex items-center gap-3 transition-all cursor-pointer ${
-                      activeTab === 'presets'
-                        ? 'bg-purple-600 text-white shadow-md'
-                        : 'text-slate-300 bg-slate-900/50 hover:bg-slate-850'
-                    }`}
-                  >
-                    <Layers className="w-4 h-4 text-purple-400" />
-                    <span>Ejemplos</span>
-                  </button>
-                </>
-              )}
-
-              {/* Shared Historial Tab */}
               <button
+                type="button"
+                onClick={() => handleTabClick('factura_manual')}
+                className={`w-full py-3 px-4 rounded-xl text-xs font-black flex items-center gap-3 transition-all cursor-pointer ${
+                  activeTab === 'factura_manual'
+                    ? 'bg-purple-600 text-white shadow-md'
+                    : 'text-slate-300 bg-slate-900/50 hover:bg-slate-850'
+                }`}
+              >
+                <Receipt className="w-4 h-4 text-purple-300" />
+                <span>Cargar Comprobantes</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => handleTabClick('historial')}
                 className={`w-full py-3 px-4 rounded-xl text-xs font-black flex items-center justify-between transition-all cursor-pointer ${
                   activeTab === 'historial'
@@ -270,17 +222,17 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <div className="flex items-center gap-3">
                   <FileSpreadsheet className="w-4 h-4 text-purple-400" />
-                  <span>{isContadora ? 'Todos los Libros' : 'Mis Extractos'}</span>
+                  <span>{isContadora ? 'Todos los Comprobantes' : 'Mis Comprobantes'}</span>
                 </div>
                 {historialCount > 0 && (
-                  <span className="font-black text-[10px] px-2 py-0.5 rounded-full bg-purple-500 text-white">
+                  <span className="font-bold text-[10px] px-2 py-0.5 rounded-full bg-purple-500 text-white">
                     {historialCount}
                   </span>
                 )}
               </button>
 
-              {/* User Identity / Auth Tab */}
               <button
+                type="button"
                 onClick={() => handleTabClick('auth')}
                 className={`w-full py-3 px-4 rounded-xl text-xs font-black flex items-center gap-3 transition-all cursor-pointer ${
                   activeTab === 'auth'
@@ -289,25 +241,24 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}
               >
                 <User className="w-4 h-4 text-purple-400" />
-                <span className="truncate max-w-[220px]">
+                <span>
                   {user ? (isContadora ? 'Estudio Contable' : user.email) : 'Iniciar Sesión'}
                 </span>
               </button>
 
-              {/* Logout Button (if logged in) */}
               {user && (
                 <button
+                  type="button"
                   onClick={() => {
                     onLogout();
                     setIsMobileMenuOpen(false);
                   }}
-                  className="w-full py-3 px-4 rounded-xl text-xs font-black flex items-center gap-3 transition-all text-rose-300 bg-rose-950/20 hover:bg-rose-900/40 border border-rose-900/20 mt-1 cursor-pointer"
+                  className="w-full py-3 px-4 rounded-xl text-xs font-black flex items-center gap-3 text-rose-300 bg-rose-950/30 hover:bg-rose-900/40 transition-all cursor-pointer mt-1"
                 >
                   <LogOut className="w-4 h-4 text-rose-400" />
                   <span>Cerrar Sesión</span>
                 </button>
               )}
-
             </nav>
           </div>
         )}

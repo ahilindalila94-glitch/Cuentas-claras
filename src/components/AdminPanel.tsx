@@ -16,7 +16,8 @@ import {
   Receipt,
   ShoppingBag,
   Sparkles,
-  Filter
+  Filter,
+  RefreshCw
 } from 'lucide-react';
 import { ItemHistorial } from '../types';
 import { formatCurrencyARS } from '../utils/formatters';
@@ -26,6 +27,7 @@ interface AdminPanelProps {
   onToggleFacturado: (id: string, currentStatus: boolean) => Promise<void>;
   onDeleteItem: (id: string) => void;
   onResetClient: (email: string) => void;
+  onRefresh?: () => void;
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
@@ -33,6 +35,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onToggleFacturado,
   onDeleteItem,
   onResetClient,
+  onRefresh,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [tipoFilter, setTipoFilter] = useState<'todos' | 'cupones' | 'lotes' | 'transferencias' | 'manuales'>('todos');
@@ -40,6 +43,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [sendingEmail, setSendingEmail] = useState<Record<string, boolean>>({});
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleManualRefresh = async () => {
+    if (onRefresh) {
+      setIsRefreshing(true);
+      await onRefresh();
+      setTimeout(() => setIsRefreshing(false), 500);
+    }
+  };
 
   const handleSendReminder = async (e: React.MouseEvent, email: string, pendingAmount: number) => {
     e.stopPropagation();
@@ -205,7 +217,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </span>
       );
     }
-    if (tipo === 'factura_manual' || orig.includes('manual')) {
+    if (tipo === 'factura_manual' || orig.includes('manual') || orig.includes('factura')) {
       return (
         <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-800 rounded-md border border-amber-200 flex items-center gap-1">
           <FileText className="w-3 h-3" /> Factura Manual
@@ -214,7 +226,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
     return (
       <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 text-slate-700 rounded-md border border-slate-200">
-        {item.resultado?.origen_billetera || 'Billetera / Banco'}
+        {item.resultado?.origen_billetera || 'Comprobante'}
       </span>
     );
   };
@@ -231,7 +243,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </div>
           <button
             onClick={() => setSuccessMsg(null)}
-            className="text-emerald-600 hover:text-emerald-800 text-xs font-bold px-2 py-1"
+            className="text-emerald-600 hover:text-emerald-800 text-xs font-bold px-2 py-1 cursor-pointer"
           >
             Cerrar
           </button>
@@ -248,27 +260,42 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </span>
               <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
               <span className="text-xs text-slate-500 font-medium font-mono">
-                Conciliación en Tiempo Real (Supabase)
+                Visibilidad Global (Supabase Receipts)
               </span>
             </div>
             <h2 className="text-xl sm:text-2xl font-black text-slate-900 mt-1">
               Libro de Conciliación y Clientes
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Administrá los cupones POSNET, cierres de lote, transferencias y facturas manuales cargadas por tus clientes.
+              Administrá los comprobantes, cupones POSNET, cierres de lote y facturas cargadas por todos tus clientes.
             </p>
           </div>
 
-          {/* Search bar */}
-          <div className="relative w-full md:w-80">
-            <Search className="absolute left-3.5 top-2.5 w-4.5 h-4.5 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Buscar por email del cliente..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 hover:border-slate-300 focus:border-purple-500 focus:bg-white text-xs font-semibold rounded-xl outline-hidden transition-all placeholder:text-slate-400"
-            />
+          <div className="flex items-center gap-3 w-full md:w-auto">
+            {/* Search bar */}
+            <div className="relative flex-1 md:w-72">
+              <Search className="absolute left-3.5 top-2.5 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Buscar por email del cliente..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9.5 pr-4 py-2 bg-slate-50 border border-slate-200 hover:border-slate-300 focus:border-purple-500 focus:bg-white text-xs font-semibold rounded-xl outline-hidden transition-all placeholder:text-slate-400"
+              />
+            </div>
+
+            {/* Refresh button */}
+            {onRefresh && (
+              <button
+                type="button"
+                onClick={handleManualRefresh}
+                disabled={isRefreshing}
+                className="p-2.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-xl transition-all shadow-3xs flex items-center justify-center shrink-0 cursor-pointer"
+                title="Actualizar registros desde Supabase"
+              >
+                <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -279,7 +306,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <User className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Clientes Totales</p>
+              <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Clientes Registrados</p>
               <h4 className="text-lg font-black text-slate-800 mt-0.5">{metrics.cantClientes}</h4>
             </div>
           </div>
@@ -309,7 +336,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <TrendingUp className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Total Acumulado</p>
+              <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Total General</p>
               <h4 className="text-lg font-black text-slate-800 mt-0.5">{formatCurrencyARS(metrics.totalGeneral)}</h4>
             </div>
           </div>
@@ -324,8 +351,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             { id: 'todos', label: 'Todos los Comprobantes' },
             { id: 'cupones', label: '💳 Cupones POS / Tarjeta' },
             { id: 'lotes', label: '🧾 Cierres de Lote' },
-            { id: 'transferencias', label: '🏦 Transferencias y Billeteras' },
-            { id: 'manuales', label: '📝 Facturas Manuales' },
+            { id: 'manuales', label: '📝 Facturas' },
+            { id: 'transferencias', label: '🏦 Otros Comprobantes' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -347,9 +374,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         {filteredClients.length === 0 ? (
           <div className="bg-white border border-slate-200 rounded-3xl p-12 text-center">
             <Mail className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-            <p className="text-sm font-bold text-slate-800">No se encontraron comprobantes registrados</p>
+            <p className="text-sm font-bold text-slate-800">No se encontraron comprobantes registrados en Supabase</p>
             <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-              Cuando tus clientes inicien sesión y carguen cupones o extractos, aparecerán aquí agrupados en tiempo real.
+              Cuando tus clientes registren comprobantes desde el módulo de carga, aparecerán aquí agrupados y en tiempo real.
             </p>
           </div>
         ) : (
@@ -377,7 +404,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </h3>
                       <div className="flex flex-wrap items-center gap-2 mt-1">
                         <span className="text-[10px] text-slate-500 font-medium">
-                          {client.items.length} registro(s) total(es)
+                          {client.items.length} comprobante(s)
                         </span>
                         {client.totalCupones > 0 && (
                           <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">
@@ -460,7 +487,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <div className="border-t border-slate-100 bg-slate-50/30 p-5 space-y-3.5">
                     <h4 className="text-[10px] uppercase font-bold tracking-wider text-slate-400 flex items-center gap-1">
                       <Layers className="w-3.5 h-3.5" />
-                      <span>Desglose de Comprobantes ({itemsToShow.length})</span>
+                      <span>Comprobantes de {client.email} ({itemsToShow.length})</span>
                     </h4>
 
                     <div className="grid grid-cols-1 gap-3">
@@ -483,31 +510,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               <div className="flex flex-wrap items-center gap-2">
                                 {getItemTypeBadge(item)}
                                 <span className="text-[10px] text-slate-500 font-mono">
-                                  Período / Fecha: {item.resultado?.fecha_periodo || 'N/A'}
+                                  Fecha / Período: {item.resultado?.fecha_periodo || 'N/A'}
                                 </span>
+                                {firstMov?.pagador_nombre_cuit && (
+                                  <span className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-semibold">
+                                    CUIT: {firstMov.pagador_nombre_cuit}
+                                  </span>
+                                )}
                               </div>
 
                               <h5 className="text-xs font-bold text-slate-800 flex items-center gap-1.5 break-all">
                                 <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                <span>{item.nombreArchivo}</span>
+                                <span>{item.nombreArchivo || firstMov?.concepto || 'Comprobante'}</span>
                               </h5>
+
+                              {firstMov?.concepto && firstMov.concepto !== item.nombreArchivo && (
+                                <p className="text-[11px] text-slate-600 font-medium">
+                                  Concepto: {firstMov.concepto}
+                                </p>
+                              )}
 
                               {/* Specialized POS / Voucher information tags */}
                               {isCupon && (
                                 <div className="text-[11px] text-purple-900 bg-purple-50/80 px-2.5 py-1 rounded-lg border border-purple-100 flex flex-wrap items-center gap-2">
                                   <span>
-                                    💳 Tarjeta: <strong>{firstMov?.tarjeta || 'Visa/Mastercard'}</strong> (
-                                    {firstMov?.tipo_tarjeta || 'Débito/Crédito'})
+                                    💳 Tarjeta: <strong>{firstMov?.tarjeta || 'POS / Terminal'}</strong>
                                   </span>
-                                  <span>•</span>
-                                  <span>
-                                    Cupón N°: <strong>{firstMov?.numero_cupon || 'S/N'}</strong>
-                                  </span>
-                                  {firstMov?.cuotas && (
+                                  {firstMov?.numero_cupon && (
                                     <>
                                       <span>•</span>
                                       <span>
-                                        Cuotas: <strong>{firstMov.cuotas}</strong>
+                                        Cupón N°: <strong>{firstMov.numero_cupon}</strong>
                                       </span>
                                     </>
                                   )}
@@ -519,24 +552,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                   <span>
                                     🧾 Lote N°: <strong>{firstMov?.numero_lote || 'N/A'}</strong>
                                   </span>
-                                  <span>•</span>
-                                  <span>
-                                    Terminal: <strong>{firstMov?.numero_terminal || 'N/A'}</strong>
-                                  </span>
-                                  <span>•</span>
-                                  <span>
-                                    Total:{' '}
-                                    <strong>
-                                      {firstMov?.cantidad_cupones || item.resultado?.detalle_movimientos?.length || 1}{' '}
-                                      cupones
-                                    </strong>
-                                  </span>
+                                  {firstMov?.numero_terminal && (
+                                    <>
+                                      <span>•</span>
+                                      <span>
+                                        Terminal: <strong>{firstMov.numero_terminal}</strong>
+                                      </span>
+                                    </>
+                                  )}
                                 </div>
                               )}
 
                               <p className="text-[10px] text-slate-400">
-                                Registrado el: {new Date(item.fechaAnalisis).toLocaleDateString('es-AR')} •{' '}
-                                {item.resultado?.detalle_movimientos?.length || 0} movimientos detectados
+                                Registrado el: {new Date(item.fechaAnalisis).toLocaleDateString('es-AR')}
                               </p>
                             </div>
 

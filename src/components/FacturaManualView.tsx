@@ -1,5 +1,17 @@
 import React, { useState } from 'react';
-import { FileText, DollarSign, User, CheckCircle2, AlertCircle, Users, Hash } from 'lucide-react';
+import { 
+  FileText, 
+  DollarSign, 
+  User, 
+  CheckCircle2, 
+  AlertCircle, 
+  Users, 
+  Hash, 
+  CreditCard, 
+  Layers, 
+  Receipt,
+  Check
+} from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface FacturaManualViewProps {
@@ -7,11 +19,14 @@ interface FacturaManualViewProps {
   onSuccess: () => void;
 }
 
+export type TipoComprobante = 'Factura' | 'Cupón POS' | 'Cierre de Lote';
+
 export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSuccess }) => {
+  const [tipoComprobante, setTipoComprobante] = useState<TipoComprobante>('Factura');
   const [esConsumidorFinal, setEsConsumidorFinal] = useState(false);
   const [cuitRazonSocial, setCuitRazonSocial] = useState('');
   const [monto, setMonto] = useState('');
-  const [conceptoNota, setConceptoNota] = useState('');
+  const [conceptoLote, setConceptoLote] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -29,13 +44,11 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
   const parseMontoInput = (val: string): number => {
     if (!val) return 0;
     let cleaned = val.trim();
-    // Remove currency symbols or extra spaces
+    // Remove currency symbols, extra spaces
     cleaned = cleaned.replace(/[$ARS\s]/gi, '');
     if (cleaned.includes('.') && cleaned.includes(',')) {
-      // e.g. "15.000,50" -> "15000.50"
       cleaned = cleaned.replace(/\./g, '').replace(',', '.');
     } else if (cleaned.includes(',')) {
-      // e.g. "15000,50" -> "15000.50"
       cleaned = cleaned.replace(',', '.');
     }
     const parsed = parseFloat(cleaned);
@@ -49,17 +62,17 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
     setMsg(null);
 
     const finalCuit = esConsumidorFinal ? 'Consumidor Final' : (cuitRazonSocial.trim() || 'Consumidor Final');
-    const finalConcepto = conceptoNota.trim();
+    const finalConcepto = conceptoLote.trim();
 
-    // Form Validations
+    // Validations
     if (!finalCuit || !monto.trim() || !finalConcepto) {
-      setMsg({ type: 'error', text: 'Por favor complete todos los campos obligatorios.' });
+      setMsg({ type: 'error', text: 'Por favor complete todos los campos obligatorios del formulario.' });
       return;
     }
 
     const numericMonto = parseMontoInput(monto);
     if (numericMonto <= 0) {
-      setMsg({ type: 'error', text: 'Por favor ingrese un monto numérico válido mayor a cero (ej: 45000 o 1500,50).' });
+      setMsg({ type: 'error', text: 'Por favor ingrese un monto válido mayor a 0 (ej: 45000 o 1500,50).' });
       return;
     }
 
@@ -69,13 +82,18 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
       const email = user?.email || 'cliente@cuentasclaras.com';
       const userId = user?.id && !user?.isLocalSession && user?.id !== 'demo-user-123' ? user.id : null;
 
-      // Complete schema payload matching receipts and extractos tables
+      // Determine standard internal operation type
+      let tipoOperacion = 'factura_manual';
+      if (tipoComprobante === 'Cupón POS') tipoOperacion = 'cupon_individual';
+      if (tipoComprobante === 'Cierre de Lote') tipoOperacion = 'cierre_lote';
+
       const recordPayload = {
         cuit: finalCuit,
         monto: numericMonto,
-        concepto: finalConcepto,
+        concepto: `${tipoComprobante}: ${finalConcepto}`,
         pagador_nombre_cuit: finalCuit,
-        origen_billetera: 'Carga Manual / Factura',
+        origen_billetera: tipoComprobante,
+        tipo_comprobante: tipoOperacion,
         fecha_periodo: new Date().toLocaleDateString('es-AR', { month: '2-digit', year: 'numeric' }),
         monto_total_acumulado: numericMonto,
         detalle_movimientos: [
@@ -84,42 +102,45 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
             monto: numericMonto,
             pagador_nombre_cuit: finalCuit,
             concepto: finalConcepto,
-            tipo_operacion: 'factura_manual',
+            tipo_operacion: tipoOperacion,
             es_consumidor_final: esConsumidorFinal,
           },
         ],
-        nombre_archivo: `Factura Manual - ${finalCuit.substring(0, 24)}`,
+        nombre_archivo: `${tipoComprobante} - ${finalCuit.substring(0, 24)}`,
         user_id: userId,
         user_email: email,
         facturado: false,
         created_at: new Date().toISOString(),
       };
 
-      console.log('Insertando comprobante único en Supabase:', recordPayload);
+      console.log('Enviando comprobante a Supabase receipts:', recordPayload);
 
-      // Single insert attempt to receipts table first, fallback to extractos if receipts table not found
+      // Direct insert into receipts table
       const { error: receiptsError } = await supabase.from('receipts').insert([recordPayload]);
       if (receiptsError) {
         console.warn('Aviso en receipts, intentando fallback en extractos:', receiptsError);
         const { error: extractosError } = await supabase.from('extractos').insert([recordPayload]);
         if (extractosError) {
-          console.error('Error insertando en extractos:', extractosError);
+          console.error('Error insertando en base de datos:', extractosError);
           throw extractosError;
         }
       }
 
-      setMsg({ type: 'success', text: '¡Comprobante / Factura manual guardado con éxito en Supabase!' });
+      setMsg({ 
+        type: 'success', 
+        text: `¡${tipoComprobante} guardado con éxito! Se ha sincronizado para la contadora.` 
+      });
       
       if (!esConsumidorFinal) {
         setCuitRazonSocial('');
       }
       setMonto('');
-      setConceptoNota('');
+      setConceptoLote('');
 
-      // Reload list immediately
+      // Reload lists and notify parent
       onSuccess();
     } catch (err: any) {
-      console.error('Error al guardar solicitud manual en Supabase:', err);
+      console.error('Error al guardar comprobante:', err);
       setMsg({
         type: 'error',
         text: err?.message || 'Ocurrió un error al persistir la información en la base de datos.',
@@ -130,22 +151,26 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
   };
 
   return (
-    <div className="max-w-xl mx-auto bg-white rounded-3xl border border-slate-200/90 p-6 sm:p-8 shadow-xs">
-      <div className="flex items-center gap-3.5 pb-5 border-b border-slate-100 mb-6">
-        <div className="w-11 h-11 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0 border border-purple-100">
-          <FileText className="w-5 h-5" />
+    <div className="max-w-2xl mx-auto bg-white rounded-3xl border border-slate-200/90 p-6 sm:p-8 shadow-xs">
+      
+      {/* Header Title */}
+      <div className="flex items-center gap-3.5 pb-6 border-b border-slate-100 mb-6">
+        <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0 border border-purple-100">
+          <Receipt className="w-6 h-6" />
         </div>
         <div>
-          <h2 className="text-base sm:text-lg font-black text-slate-800 tracking-tight">
-            Factura por Texto / Carga Manual
+          <h2 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
+            Carga Manual de Comprobantes / Cierre de Lote
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Registrá ventas, tickets o cupones POS sin comprobante adjunto para conciliar con la contadora.
+            Registrá de forma directa tus ventas, cupones POS y cierres de lote para conciliar con la contadora.
           </p>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-5">
+      <form onSubmit={handleSubmit} className="space-y-6">
+        
+        {/* Feedback Message */}
         {msg && (
           <div
             className={`p-4 rounded-2xl text-xs font-semibold border flex items-center gap-2.5 ${
@@ -155,23 +180,65 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
             }`}
           >
             {msg.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
             ) : (
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
             )}
             <span>{msg.text}</span>
           </div>
         )}
 
-        {/* Consumidor Final Switch / Checkbox */}
-        <div className="p-3.5 bg-purple-50/60 border border-purple-200/70 rounded-2xl flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
-              <Users className="w-4 h-4" />
+        {/* 1. Tipo de Comprobante Selector */}
+        <div className="space-y-2">
+          <label className="text-[11px] font-black text-slate-700 uppercase tracking-wider block">
+            1. Tipo de Comprobante <span className="text-rose-500">*</span>
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {[
+              { id: 'Factura' as TipoComprobante, label: 'Factura', icon: FileText, desc: 'Venta o servicio directo' },
+              { id: 'Cupón POS' as TipoComprobante, label: 'Cupón POS', icon: CreditCard, desc: 'Cobro Posnet/Payway' },
+              { id: 'Cierre de Lote' as TipoComprobante, label: 'Cierre de Lote', icon: Layers, desc: 'Resumen total de terminal' },
+            ].map((tipo) => {
+              const Icon = tipo.icon;
+              const isSelected = tipoComprobante === tipo.id;
+              return (
+                <button
+                  key={tipo.id}
+                  type="button"
+                  onClick={() => setTipoComprobante(tipo.id)}
+                  className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                    isSelected
+                      ? 'border-purple-600 bg-purple-50/50 ring-2 ring-purple-600/20 text-purple-950'
+                      : 'border-slate-200 hover:border-slate-300 bg-slate-50/50 text-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <Icon className={`w-4 h-4 ${isSelected ? 'text-purple-600' : 'text-slate-500'}`} />
+                    {isSelected && (
+                      <span className="w-4 h-4 rounded-full bg-purple-600 text-white flex items-center justify-center text-[10px]">
+                        <Check className="w-2.5 h-2.5" />
+                      </span>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold">{tipo.label}</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">{tipo.desc}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 2. Checkbox Consumidor Final */}
+        <div className="p-4 bg-purple-50/60 border border-purple-200/70 rounded-2xl flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
+              <Users className="w-4.5 h-4.5" />
             </div>
             <div>
               <p className="text-xs font-bold text-purple-950">Facturar a Consumidor Final</p>
-              <p className="text-[11px] text-purple-700">Mapea automáticamente CUIT como "Consumidor Final"</p>
+              <p className="text-[11px] text-purple-700">Asigna automáticamente CUIT como "Consumidor Final"</p>
             </div>
           </div>
 
@@ -183,14 +250,14 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
               onChange={(e) => handleToggleConsumidorFinal(e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-10 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
           </label>
         </div>
 
-        {/* 1. CUIT / Razón Social */}
+        {/* 3. CUIT / Razón Social */}
         <div className="space-y-1.5">
           <label className="text-[11px] font-black text-slate-700 uppercase tracking-wider block">
-            CUIT / Razón Social <span className="text-rose-500">*</span>
+            2. CUIT / Razón Social <span className="text-rose-500">*</span>
           </label>
           <div className="relative">
             <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
@@ -212,10 +279,10 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
           </div>
         </div>
 
-        {/* 2. Monto ($) */}
+        {/* 4. Monto ($) */}
         <div className="space-y-1.5">
           <label className="text-[11px] font-black text-slate-700 uppercase tracking-wider block">
-            Monto ($) <span className="text-rose-500">*</span>
+            3. Monto Total ($) <span className="text-rose-500">*</span>
           </label>
           <div className="relative">
             <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400 font-bold text-xs">
@@ -232,10 +299,10 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
           </div>
         </div>
 
-        {/* 3. Concepto / Número de Cupón o Comprobante */}
+        {/* 5. Concepto / N° de Lote o Cupón */}
         <div className="space-y-1.5">
           <label className="text-[11px] font-black text-slate-700 uppercase tracking-wider block">
-            Concepto / N° de Cupón o Comprobante <span className="text-rose-500">*</span>
+            4. Concepto / N° de Lote o Cupón <span className="text-rose-500">*</span>
           </label>
           <div className="relative">
             <span className="absolute inset-y-0 left-0 pl-3.5 top-3 flex items-start text-slate-400">
@@ -244,18 +311,26 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
             <textarea
               required
               rows={3}
-              placeholder="Ej: Cupón 235-0052, Venta en mostrador o Cobro POSNET"
-              value={conceptoNota}
-              onChange={(e) => setConceptoNota(e.target.value)}
+              placeholder={
+                tipoComprobante === 'Cierre de Lote'
+                  ? 'Ej: Lote N° 045 terminal POSNET 8402, 18 operaciones'
+                  : tipoComprobante === 'Cupón POS'
+                  ? 'Ej: Cupón 235-0052, Tarjeta Visa Débito'
+                  : 'Ej: Venta de mercadería en mostrador, Factura B'
+              }
+              value={conceptoLote}
+              onChange={(e) => setConceptoLote(e.target.value)}
               className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-xl text-xs font-semibold focus:bg-white focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all text-slate-900 outline-hidden resize-none"
             />
           </div>
         </div>
 
+        {/* Submit Button */}
         <button
           type="submit"
+          id="btn-submit-comprobante"
           disabled={isSubmitting}
-          className="w-full py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-300 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+          className="w-full py-3.5 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-300 text-white rounded-xl text-xs font-black transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer"
         >
           {isSubmitting ? (
             <>
@@ -263,11 +338,10 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
               <span>Guardando en Supabase...</span>
             </>
           ) : (
-            <span>Guardar y Enviar a la Contadora</span>
+            <span>Guardar Comprobante</span>
           )}
         </button>
       </form>
     </div>
   );
 };
-

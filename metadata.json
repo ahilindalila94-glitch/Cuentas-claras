@@ -1,6 +1,6 @@
 {
   "name": "Cuentas Claras - Asistente Contable",
-  "description": "Extractor contable automatizado de transferencias e ingresos desde comprobantes, fotos y extractos bancarios en PDF (Mercado Pago, Ualá, Naranja X, bancos) a formato JSON estructurado.",
+  "description": "Sistema contable de carga manual de comprobantes, cupones POS y cierres de lote, con panel de administración y conciliación impositiva global para la contadora.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
