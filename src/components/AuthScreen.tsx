@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { KeyRound, Mail, UserPlus, LogIn, Sparkles, Shield, User } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { KeyRound, Mail, UserPlus, LogIn, Sparkles, UserCheck } from 'lucide-react';
 import { UserRole } from '../types';
 import { Logo } from './Logo';
 
@@ -12,7 +12,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [selectedRole, setSelectedRole] = useState<UserRole>('cliente');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -23,18 +22,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     setError(null);
     setSuccessMsg(null);
 
-    // Hardcoded rule: 'ahilindalila94@gmail.com' is always admin_contadora
-    const finalRole = email.trim().toLowerCase() === 'ahilindalila94@gmail.com' 
+    const cleanEmail = email.trim().toLowerCase();
+    
+    // Strict role determination: only ahilindalila94@gmail.com is admin_contadora
+    const finalRole: UserRole = cleanEmail === 'ahilindalila94@gmail.com' 
       ? 'admin_contadora' 
-      : selectedRole;
+      : 'cliente';
 
     try {
       if (isSignUp) {
-        // Save metadata locally for offline/mock lookup fallback
-        localStorage.setItem(`meta_${email.trim().toLowerCase()}`, JSON.stringify({ role: finalRole }));
+        // Save metadata locally for offline/fallback lookup
+        localStorage.setItem(`meta_${cleanEmail}`, JSON.stringify({ role: finalRole }));
 
         const { data, error: signUpErr } = await supabase.auth.signUp({
-          email: email.trim(),
+          email: cleanEmail,
           password,
           options: {
             data: {
@@ -47,35 +48,29 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         if (data?.user) {
           const userWithRole = {
             ...data.user,
-            role: email.trim().toLowerCase() === 'ahilindalila94@gmail.com' 
-              ? 'admin_contadora' 
-              : (data.user.user_metadata?.role || finalRole)
+            email: cleanEmail,
+            role: finalRole
           };
-          setSuccessMsg(`¡Registro exitoso! Iniciando sesión automáticamente...`);
+          setSuccessMsg(`¡Registro exitoso! Iniciando sesión...`);
           setTimeout(() => {
             onAuthSuccess(userWithRole);
-          }, 1500);
+          }, 1200);
         } else {
-          setSuccessMsg(`¡Registro exitoso como ${finalRole === 'admin_contadora' ? 'Contadora' : 'Cliente'}!`);
+          setSuccessMsg(`¡Registro exitoso! Ya podés iniciar sesión.`);
           setIsSignUp(false);
         }
       } else {
         const { data, error: signInErr } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
+          email: cleanEmail,
           password,
         });
         if (signInErr) throw signInErr;
         
         if (data?.user) {
-          // If real user is logged in, attach metadata role manually if not present
-          const userMeta = localStorage.getItem(`meta_${email.trim().toLowerCase()}`);
-          const storedRole = userMeta ? JSON.parse(userMeta).role : null;
-          
           const userWithRole = {
             ...data.user,
-            role: email.trim().toLowerCase() === 'ahilindalila94@gmail.com' 
-              ? 'admin_contadora' 
-              : (data.user.user_metadata?.role || storedRole || 'cliente')
+            email: cleanEmail,
+            role: finalRole
           };
           onAuthSuccess(userWithRole);
         }
@@ -85,7 +80,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
       
       const errStr = String(err?.message || err || '').toLowerCase();
       
-      // Check if it's a specific validation error from database (credentials, format, user exists)
       const isValidationError = errStr.includes('invalid email') || 
                                 errStr.includes('invalid credentials') || 
                                 errStr.includes('invalid login') || 
@@ -95,7 +89,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                                 errStr.includes('usuario ya registrado') ||
                                 errStr.includes('formato');
       
-      // If it is NOT an explicit credential validation error, or if it has network/blocked terms like 'failed to fetch', 'load failed', 'typeerror', 'cors'
       const isNetOrBlockedErr = !isValidationError || 
                                  errStr.includes('fetch') || 
                                  errStr.includes('failed') || 
@@ -107,44 +100,45 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                                  errStr === '';
       
       if (isNetOrBlockedErr) {
-        // Automatically activate a local persistent session
+        // Local persistent fallback session
         const localUser = {
-          id: 'local-user-' + btoa(email),
-          email: email.trim(),
+          id: 'local-user-' + btoa(cleanEmail),
+          email: cleanEmail,
           isLocalSession: true,
           created_at: new Date().toISOString(),
           role: finalRole,
           user_metadata: { role: finalRole }
         };
         localStorage.setItem('local_supabase_session', JSON.stringify(localUser));
-        localStorage.setItem(`meta_${email.trim().toLowerCase()}`, JSON.stringify({ role: finalRole }));
+        localStorage.setItem(`meta_${cleanEmail}`, JSON.stringify({ role: finalRole }));
         
         setSuccessMsg(
-          `¡Registro exitoso! Iniciando sesión en modo seguro local (offline) como ${
+          `¡Ingreso correcto en modo persistente como ${
             finalRole === 'admin_contadora' ? 'CONTADORA (Admin)' : 'CLIENTE'
-          }.`
+          }!`
         );
         
         setTimeout(() => {
           onAuthSuccess(localUser);
-        }, 1500);
+        }, 1200);
       } else {
-        setError(err?.message || 'Ocurrió un error inesperado al autenticar.');
+        setError(err?.message || 'Ocurrió un error al autenticar. Verifique sus datos.');
       }
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleQuickDemoMode = (role: UserRole) => {
+  const handleQuickDemoMode = () => {
+    // Quick demo for clients with clean zero state
     const mockUser = {
-      id: role === 'admin_contadora' ? 'demo-admin-456' : 'demo-user-123',
-      email: role === 'admin_contadora' ? 'ahilindalila94@gmail.com' : 'cliente.demo@contasimpl.com',
+      id: 'demo-client-' + Math.random().toString(36).substring(2, 7),
+      email: 'cliente.demo@cuentasclaras.com',
       isDemo: true,
-      role: role,
-      user_metadata: { role: role }
+      role: 'cliente' as UserRole,
+      user_metadata: { role: 'cliente' }
     };
-    localStorage.setItem(`meta_${mockUser.email}`, JSON.stringify({ role }));
+    localStorage.setItem(`meta_${mockUser.email}`, JSON.stringify({ role: 'cliente' }));
     onAuthSuccess(mockUser);
   };
 
@@ -158,7 +152,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
           Estudio Ahilin Torres
         </h2>
         <p className="text-[11px] text-slate-500 mt-0.5">
-          Asesoría Contable & Conciliación
+          Asesoría Contable & Conciliación Impositiva
         </p>
       </div>
 
@@ -168,8 +162,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
           type="button"
           onClick={() => {
             setIsSignUp(false);
-            setError('');
-            setSuccessMsg('');
+            setError(null);
+            setSuccessMsg(null);
           }}
           className={`py-3 text-sm font-black rounded-xl transition-all flex items-center justify-center gap-2 ${
             !isSignUp
@@ -184,8 +178,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
           type="button"
           onClick={() => {
             setIsSignUp(true);
-            setError('');
-            setSuccessMsg('');
+            setError(null);
+            setSuccessMsg(null);
           }}
           className={`py-3 text-sm font-black rounded-xl transition-all flex items-center justify-center gap-2 ${
             isSignUp
@@ -211,44 +205,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
       )}
 
       <form onSubmit={handleAuth} className="space-y-4">
-        {/* Role Selector Segmented Controls - Only show on Sign Up, but we show information on Sign In */}
-        {isSignUp && (
-          <div className="space-y-1.5">
-            <label className="block text-xs font-black text-slate-700 uppercase tracking-wider">
-              Selecciona tu Rol de Cuenta
-            </label>
-            <div className="grid grid-cols-2 gap-2 bg-slate-50 p-1 rounded-xl border border-slate-200">
-              <button
-                type="button"
-                onClick={() => setSelectedRole('cliente')}
-                className={`py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-                  selectedRole === 'cliente'
-                    ? 'bg-white text-purple-700 shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                <User className="w-3.5 h-3.5" />
-                <span>Cliente / Comercio</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedRole('admin_contadora')}
-                className={`py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-                  selectedRole === 'admin_contadora'
-                    ? 'bg-white text-purple-700 shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                <Shield className="w-3.5 h-3.5" />
-                <span>Estudio Contable</span>
-              </button>
-            </div>
-            <p className="text-[10px] text-slate-400 leading-snug">
-              * Nota: El correo <strong>ahilindalila94@gmail.com</strong> se registrará automáticamente como Contadora.
-            </p>
-          </div>
-        )}
-
         <div>
           <label className="block text-xs font-black text-slate-700 uppercase tracking-wider mb-1.5">
             Correo Electrónico
@@ -260,8 +216,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="tu@ejemplo.com"
-              className="w-full pl-10 pr-4 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all placeholder:text-slate-400"
+              placeholder="tu@correo.com"
+              className="w-full pl-10 pr-4 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all placeholder:text-slate-400 text-slate-900"
             />
           </div>
         </div>
@@ -279,7 +235,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               minLength={6}
-              className="w-full pl-10 pr-4 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all placeholder:text-slate-400"
+              className="w-full pl-10 pr-4 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 hover:border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all placeholder:text-slate-400 text-slate-900"
             />
           </div>
         </div>
@@ -287,47 +243,34 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         <button
           type="submit"
           disabled={isLoading}
-          className="w-full py-3 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2"
+          className="w-full py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-300 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
         >
           {isLoading ? (
             <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
           ) : isSignUp ? (
             <>
               <UserPlus className="w-4 h-4" />
-              <span>Crear mi Cuenta de {selectedRole === 'admin_contadora' ? 'Contadora' : 'Cliente'}</span>
+              <span>Crear mi Cuenta de Cliente</span>
             </>
           ) : (
             <>
               <LogIn className="w-4 h-4" />
-              <span>Ingresar a mi Cuenta</span>
+              <span>Iniciar Sesión</span>
             </>
           )}
         </button>
       </form>
 
-      {/* Segmented Quick Demo Mode Buttons */}
-      <div className="space-y-2 pt-2 border-t border-slate-100">
-        <p className="text-[10px] uppercase font-extrabold tracking-wider text-slate-400 text-center">
-          Demostración Rápida Local
-        </p>
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => handleQuickDemoMode('cliente')}
-            className="py-2.5 px-3 bg-purple-50 hover:bg-purple-100/80 text-purple-700 border border-purple-200/50 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1.5 shadow-2xs"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Cliente Demo</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => handleQuickDemoMode('admin_contadora')}
-            className="py-2.5 px-3 bg-purple-50 hover:bg-purple-100/80 text-purple-700 border border-purple-200/50 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1.5 shadow-2xs"
-          >
-            <Shield className="w-3.5 h-3.5" />
-            <span>Contadora Demo</span>
-          </button>
-        </div>
+      {/* Guest Exploration Link */}
+      <div className="pt-2 border-t border-slate-100 text-center">
+        <button
+          type="button"
+          onClick={handleQuickDemoMode}
+          className="w-full py-2.5 px-3 bg-slate-50 hover:bg-purple-50 text-slate-600 hover:text-purple-700 border border-slate-200/80 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-purple-500" />
+          <span>Explorar como Cliente de Prueba (Historial en $0)</span>
+        </button>
       </div>
     </div>
   );

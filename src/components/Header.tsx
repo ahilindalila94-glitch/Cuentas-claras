@@ -30,11 +30,13 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
 }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const isContadora = user?.role === 'admin_contadora';
+  
+  // Strictly verify that only ahilindalila94@gmail.com with admin_contadora role can see the admin panel
+  const isContadora = user?.role === 'admin_contadora' && user?.email?.trim().toLowerCase() === 'ahilindalila94@gmail.com';
 
   const handleTabClick = (tab: 'analizador' | 'historial' | 'presets' | 'auth' | 'panel_control' | 'factura_manual') => {
     setActiveTab(tab);
-    setIsMobileMenuOpen(false); // Close mobile menu after clicking
+    setIsMobileMenuOpen(false);
   };
 
   return (
