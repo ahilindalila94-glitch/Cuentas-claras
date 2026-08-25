@@ -60,18 +60,38 @@ async function startServer() {
         },
       });
 
-      const systemInstruction = `Sos un asistente contable automatizado de alta precisión para billeteras virtuales (Mercado Pago, Naranja X, Ualá, Personal Pay, Brubank, Cuenta DNI, BNA+, Modo) y bancos (Galicia, Santander, BBVA, Macro, Banco Nación, Banco Provincia, etc.).
-Tu tarea es analizar comprobantes individuales, capturas de transferencias, fotos o resúmenes/extractos bancarios en PDF o texto.
-Debes extraer la información de las transferencias RECIBIDAS, acreditaciones e INGRESOS DE DINERO.
+      const systemInstruction = `Sos un asistente contable y perito en visión de comprobantes fiscales y comerciales para Argentina (AFIP / ARCA), billeteras virtuales y terminales de pago POS (POSNET, Payway, Getnet, Lapos, Mercado Pago Point, Clover, etc.).
 
-REGLAS DE EXTRACCIÓN:
-1. "origen_billetera": Identificar el nombre de la app, billetera virtual o entidad bancaria de donde proviene o donde se recibió la transferencia (Ejemplos: "Mercado Pago", "Naranja X", "Ualá", "Banco Galicia", "Santander", "Cuenta DNI", "Brubank", "Personal Pay", "BNA+"). Si no se deduce con certeza, indicar "Billetera / Banco No Especificado".
-2. "fecha_periodo": Fecha puntual de la operación (ej: "2026-08-14 10:42") o rango de fechas si es un extracto/resumen (ej: "01/08/2026 al 15/08/2026").
-3. "monto_total_acumulado": Suma matemática total numérica de los ingresos/transferencias recibidas (número flotante decimal, ej: 154800.50).
-4. "detalle_movimientos": Lista de cada transferencia recibida/ingreso detectado:
-   - "fecha": Fecha ("YYYY-MM-DD" o "YYYY-MM-DD HH:mm" o "HH:mm" según figure).
-   - "monto": Valor numérico positivo del ingreso (ej: 45000.00).
-   - "pagador_nombre_cuit": Nombre completo de la persona o empresa que envió el dinero y su CUIT/CUIL si figura en el comprobante (ej: "Juan Ignacio Rossi - CUIT 20-38491029-4"). Si no figura el pagador, poner exactamente "No identificado".
+Tu tarea es analizar fotos de tickets, capturas de transferencias, comprobantes individuales, resúmenes bancarios o cierres de lote y extraer con absoluta precisión la información contable.
+
+DISTINCIÓN DE TIPOS DE DOCUMENTO:
+
+1. CUPÓN INDIVIDUAL DE TARJETA (Ticket POSNET / Payway / Getnet / Point / Lapos):
+   - "origen_billetera": Nombre de la terminal o red (ej: "POSNET / Payway", "Getnet", "Mercado Pago Point", "Lapos").
+   - "tipo_comprobante": "cupon_individual"
+   - Identificar:
+     * Tarjeta: Marca de la tarjeta (Visa, Mastercard, Cabal, American Express, Maestro, Naranja).
+     * Tipo: Crédito, Débito, Prepaga.
+     * N° de Cupón / N° de Comprobante / N° de Operación / Trace.
+     * Cantidad de Cuotas: Número entero (1, 3, 6, 12...).
+     * Monto Total ($).
+   - En "pagador_nombre_cuit": Si no figura nombre o CUIT del cliente, escribir por defecto "Consumidor Final (Tarjeta [Marca] [Tipo] - Cupón #[N°] - [Cuotas] ctas)".
+
+2. CIERRE DE LOTE (Ticket de Cierre / Resumen de Lote / Batch Close POSNET / Getnet / Payway / Lapos):
+   - "origen_billetera": "Cierre de Lote " + (terminal o procesador, ej: "Cierre de Lote - Payway / POSNET").
+   - "tipo_comprobante": "cierre_lote"
+   - Identificar:
+     * N° de Lote (Batch Number).
+     * N° de Terminal / N° de Comercio / Merchant ID.
+     * Cantidad total de cupones / transacciones / operaciones del lote.
+     * Monto total acumulado del lote ($).
+   - En "pagador_nombre_cuit": Escribir "Cierre de Lote #[N° Lote] - Terminal #[Terminal] ([Cantidad] Cupones)".
+
+3. TRANSFERENCIA BANCARIA O BILLETERA VIRTUAL (Mercado Pago, Naranja X, Ualá, Cuenta DNI, Galicia, Santander, BBVA, Macro, Nación, etc.):
+   - "origen_billetera": Nombre de la billetera o banco.
+   - "tipo_comprobante": "transferencia" o "extracto".
+   - "monto_total_acumulado": Suma de transferencias recibidas.
+   - "detalle_movimientos": Lista de ingresos con fecha, monto y pagador/CUIT (o "Consumidor Final" / "No identificado").
 
 Devuelve ÚNICAMENTE el objeto JSON estricto estructurado según el schema especificado, sin texto introductorio ni markdown adicional.`;
 
@@ -138,7 +158,7 @@ Extrae todas las transferencias recibidas e ingresos y genera la respuesta JSON 
                 properties: {
                   origen_billetera: {
                     type: Type.STRING,
-                    description: "Nombre de la app, billetera o banco (ej: Mercado Pago, Naranja X, Ualá, etc.)",
+                    description: "Nombre de la app, terminal POS o banco (ej: POSNET / Payway, Getnet, Mercado Pago, Cierre de Lote)",
                   },
                   fecha_periodo: {
                     type: Type.STRING,
@@ -146,11 +166,34 @@ Extrae todas las transferencias recibidas e ingresos y genera la respuesta JSON 
                   },
                   monto_total_acumulado: {
                     type: Type.NUMBER,
-                    description: "Monto total numérico acumulado de transferencias recibidas",
+                    description: "Monto total numérico acumulado en pesos",
+                  },
+                  tipo_comprobante: {
+                    type: Type.STRING,
+                    description: "cupon_individual, cierre_lote, transferencia o extracto",
+                  },
+                  info_cupon: {
+                    type: Type.OBJECT,
+                    properties: {
+                      tarjeta: { type: Type.STRING },
+                      tipo_tarjeta: { type: Type.STRING },
+                      numero_cupon: { type: Type.STRING },
+                      cuotas: { type: Type.NUMBER },
+                      monto: { type: Type.NUMBER },
+                    },
+                  },
+                  info_lote: {
+                    type: Type.OBJECT,
+                    properties: {
+                      numero_lote: { type: Type.STRING },
+                      numero_terminal: { type: Type.STRING },
+                      cantidad_cupones: { type: Type.NUMBER },
+                      monto_lote: { type: Type.NUMBER },
+                    },
                   },
                   detalle_movimientos: {
                     type: Type.ARRAY,
-                    description: "Listado de transferencias e ingresos recibidos",
+                    description: "Listado de operaciones, cupones o ingresos",
                     items: {
                       type: Type.OBJECT,
                       properties: {
@@ -160,12 +203,16 @@ Extrae todas las transferencias recibidas e ingresos y genera la respuesta JSON 
                         },
                         monto: {
                           type: Type.NUMBER,
-                          description: "Monto de la transferencia recibida",
+                          description: "Monto de la operación",
                         },
                         pagador_nombre_cuit: {
                           type: Type.STRING,
-                          description: "Nombre o CUIT del pagador si figura, sino 'No identificado'",
+                          description: "Nombre/CUIT del pagador, o 'Consumidor Final'",
                         },
+                        tarjeta: { type: Type.STRING },
+                        tipo_tarjeta: { type: Type.STRING },
+                        numero_cupon: { type: Type.STRING },
+                        cuotas: { type: Type.NUMBER },
                       },
                       required: ["fecha", "monto", "pagador_nombre_cuit"],
                     },

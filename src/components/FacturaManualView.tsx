@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileText, DollarSign, User, CheckCircle2, AlertCircle } from 'lucide-react';
+import { FileText, DollarSign, User, CheckCircle2, AlertCircle, Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface FacturaManualViewProps {
@@ -8,18 +8,32 @@ interface FacturaManualViewProps {
 }
 
 export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSuccess }) => {
+  const [esConsumidorFinal, setEsConsumidorFinal] = useState(false);
   const [cuitRazonSocial, setCuitRazonSocial] = useState('');
   const [monto, setMonto] = useState('');
   const [conceptoNota, setConceptoNota] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  const handleToggleConsumidorFinal = (checked: boolean) => {
+    setEsConsumidorFinal(checked);
+    if (checked) {
+      setCuitRazonSocial('Consumidor Final');
+    } else {
+      if (cuitRazonSocial === 'Consumidor Final') {
+        setCuitRazonSocial('');
+      }
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setMsg(null);
 
+    const finalCuit = esConsumidorFinal ? 'Consumidor Final' : cuitRazonSocial.trim();
+
     // Form Validations
-    if (!cuitRazonSocial.trim() || !monto.trim() || !conceptoNota.trim()) {
+    if (!finalCuit || !monto.trim() || !conceptoNota.trim()) {
       setMsg({ type: 'error', text: 'Por favor complete todos los campos obligatorios.' });
       return;
     }
@@ -44,33 +58,37 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
           {
             fecha: new Date().toISOString().split('T')[0],
             monto: numericMonto,
-            pagador_nombre_cuit: `${cuitRazonSocial.trim()} (${conceptoNota.trim()})`
-          }
+            pagador_nombre_cuit: `${finalCuit} (${conceptoNota.trim()})`,
+            tipo_operacion: 'factura_manual',
+            es_consumidor_final: esConsumidorFinal,
+          },
         ],
-        nombre_archivo: `Factura Manual - ${cuitRazonSocial.trim().substring(0, 24)}`,
+        nombre_archivo: `Factura Manual - ${finalCuit.substring(0, 24)}`,
         user_id: userId,
         user_email: email,
         facturado: false,
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
       };
 
-      // Save to Supabase Cloud Database directly
+      // Direct client insert into Supabase table 'extractos'
       const { error } = await supabase.from('extractos').insert([payload]);
       if (error) throw error;
 
-      setMsg({ type: 'success', text: '¡Comprobante / Solicitud manual registrado con éxito en la nube!' });
-      setCuitRazonSocial('');
+      setMsg({ type: 'success', text: '¡Comprobante / Solicitud manual registrado con éxito en Supabase!' });
+      if (!esConsumidorFinal) {
+        setCuitRazonSocial('');
+      }
       setMonto('');
       setConceptoNota('');
-      
+
       setTimeout(() => {
         onSuccess();
       }, 800);
     } catch (err: any) {
       console.error('Error al guardar solicitud manual en Supabase:', err);
-      setMsg({ 
-        type: 'error', 
-        text: err?.message || 'Ocurrió un error al persistir la información en la base de datos.' 
+      setMsg({
+        type: 'error',
+        text: err?.message || 'Ocurrió un error al persistir la información en la base de datos.',
       });
     } finally {
       setIsSubmitting(false);
@@ -88,18 +106,20 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
             Factura por Texto / Carga Manual
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Registrá directamente operaciones sin comprobante adjunto para conciliar con la contadora.
+            Registrá ventas, tickets o transferencias sin comprobante adjunto para conciliar con la contadora.
           </p>
         </div>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
         {msg && (
-          <div className={`p-4 rounded-2xl text-xs font-semibold border flex items-center gap-2.5 ${
-            msg.type === 'success' 
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
-              : 'bg-rose-50 border-rose-200 text-rose-800'
-          }`}>
+          <div
+            className={`p-4 rounded-2xl text-xs font-semibold border flex items-center gap-2.5 ${
+              msg.type === 'success'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                : 'bg-rose-50 border-rose-200 text-rose-800'
+            }`}
+          >
             {msg.type === 'success' ? (
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             ) : (
@@ -108,6 +128,30 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
             <span>{msg.text}</span>
           </div>
         )}
+
+        {/* Consumidor Final Switch / Checkbox */}
+        <div className="p-3.5 bg-purple-50/60 border border-purple-200/70 rounded-2xl flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
+              <Users className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-purple-950">Facturar a Consumidor Final</p>
+              <p className="text-[11px] text-purple-700">Autocompleta CUIT/Razón Social sin datos fiscales</p>
+            </div>
+          </div>
+
+          <label className="relative inline-flex items-center cursor-pointer select-none">
+            <input
+              type="checkbox"
+              id="switch-consumidor-final"
+              checked={esConsumidorFinal}
+              onChange={(e) => handleToggleConsumidorFinal(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-10 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+          </label>
+        </div>
 
         {/* 1. CUIT / Razón Social */}
         <div className="space-y-1.5">
@@ -121,10 +165,15 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
             <input
               type="text"
               required
-              placeholder="Ej: 20-34981290-3 o Perez Construcciones S.A."
-              value={cuitRazonSocial}
+              disabled={esConsumidorFinal}
+              placeholder={esConsumidorFinal ? 'Consumidor Final' : 'Ej: 20-34981290-3 o Perez Construcciones S.A.'}
+              value={esConsumidorFinal ? 'Consumidor Final' : cuitRazonSocial}
               onChange={(e) => setCuitRazonSocial(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-xl text-xs font-semibold focus:bg-white focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all text-slate-900 outline-hidden"
+              className={`w-full pl-10 pr-4 py-2.5 bg-slate-50 border rounded-xl text-xs font-semibold focus:bg-white focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all text-slate-900 outline-hidden ${
+                esConsumidorFinal
+                  ? 'border-purple-200 bg-purple-50/40 text-purple-900 font-bold cursor-not-allowed'
+                  : 'border-slate-200 hover:border-slate-300'
+              }`}
             />
           </div>
         </div>
@@ -158,7 +207,7 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
           <textarea
             required
             rows={3}
-            placeholder="Ej: Honorarios profesionales del mes o Venta de mercadería según presupuesto #104"
+            placeholder="Ej: Venta en mostrador, Honorarios o Cobro POSNET cupón #492"
             value={conceptoNota}
             onChange={(e) => setConceptoNota(e.target.value)}
             className="w-full p-3.5 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-xl text-xs font-semibold focus:bg-white focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all text-slate-900 outline-hidden resize-none"
@@ -173,7 +222,7 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
           {isSubmitting ? (
             <>
               <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              <span>Guardando en la nube...</span>
+              <span>Guardando en Supabase...</span>
             </>
           ) : (
             <span>Guardar y Enviar a la Contadora</span>

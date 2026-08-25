@@ -2,6 +2,16 @@ export interface MovimientoDetalle {
   fecha: string;
   monto: number;
   pagador_nombre_cuit: string;
+  // Specialized voucher & batch closing metadata
+  tipo_operacion?: 'cupon_individual' | 'cierre_lote' | 'transferencia' | 'extracto' | 'factura_manual';
+  tarjeta?: string; // ej: Visa, Mastercard, Cabal, Amex
+  tipo_tarjeta?: 'Crédito' | 'Débito' | 'Prepaga' | string;
+  numero_cupon?: string;
+  cuotas?: number;
+  numero_lote?: string;
+  numero_terminal?: string;
+  cantidad_cupones?: number;
+  es_consumidor_final?: boolean;
 }
 
 export interface ComprobanteResultado {
@@ -9,6 +19,20 @@ export interface ComprobanteResultado {
   fecha_periodo: string;
   monto_total_acumulado: number;
   detalle_movimientos: MovimientoDetalle[];
+  tipo_comprobante?: 'cupon_individual' | 'cierre_lote' | 'transferencia' | 'extracto' | 'factura_manual';
+  info_lote?: {
+    numero_lote?: string;
+    numero_terminal?: string;
+    cantidad_cupones?: number;
+    monto_lote?: number;
+  };
+  info_cupon?: {
+    tarjeta?: string;
+    tipo_tarjeta?: string;
+    numero_cupon?: string;
+    cuotas?: number;
+    monto?: number;
+  };
 }
 
 export interface ItemHistorial {
@@ -38,8 +62,8 @@ export interface AppUser {
 export interface PresetSample {
   id: string;
   titulo: string;
-  entidad: 'Mercado Pago' | 'Ualá' | 'Naranja X' | 'Banco Galicia' | 'Santander' | 'Cuenta DNI';
-  tipo: 'comprobante_individual' | 'extracto_mensual' | 'texto_crudo';
+  entidad: string;
+  tipo: string;
   descripcion: string;
   icono: string;
   datosEjemplo: {

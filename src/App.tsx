@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { UploadZone } from './components/UploadZone';
 import { ResultCard } from './components/ResultCard';
@@ -7,8 +7,9 @@ import { PresetsView } from './components/PresetsView';
 import { AuthScreen } from './components/AuthScreen';
 import { AdminPanel } from './components/AdminPanel';
 import { FacturaManualView } from './components/FacturaManualView';
-import { ComprobanteResultado, ItemHistorial, UserRole } from './types';
+import { ComprobanteResultado, ItemHistorial, UserRole, PresetSample } from './types';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
+import { analyzeComprobanteWithAI } from './lib/aiAnalyzer';
 import { AlertCircle, X } from 'lucide-react';
 
 export function App() {
@@ -17,15 +18,15 @@ export function App() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [resultadoActual, setResultadoActual] = useState<ComprobanteResultado | null>(null);
   const [currentFileName, setCurrentFileName] = useState<string>('');
-  
+
   // Strict initial auth state: null (no auto-login, zero credentials on startup)
   const [user, setUser] = useState<any>(null);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
-  
-  // Real history initialized to empty array (no fake samples)
+
+  // Real history initialized to empty array
   const [historial, setHistorial] = useState<ItemHistorial[]>([]);
 
-  // Function to load extractos from Supabase / Storage
+  // Function to load extractos from Supabase
   const fetchExtractos = async (currentUser: any) => {
     if (!currentUser) {
       setHistorial([]);
@@ -34,16 +35,20 @@ export function App() {
 
     try {
       const isContadora = currentUser.role === 'admin_contadora' && currentUser.email?.trim().toLowerCase() === 'ahilindalila94@gmail.com';
-      
+
       let query = supabase.from('extractos').select('*');
-      
-      // If client, strictly filter only by their user_id
+
+      // If client, strictly filter only by their user_id or email
       if (!isContadora) {
-        query = query.eq('user_id', currentUser.id);
+        if (currentUser.id && currentUser.id !== 'demo-user-123') {
+          query = query.or(`user_id.eq.${currentUser.id},user_email.eq.${currentUser.email}`);
+        } else {
+          query = query.eq('user_email', currentUser.email);
+        }
       }
-      
+
       const { data, error } = await query;
-      
+
       if (error) {
         console.warn('Error al consultar extractos en Supabase:', error);
         return;
@@ -52,7 +57,7 @@ export function App() {
       if (data && Array.isArray(data)) {
         const mapped: ItemHistorial[] = data.map((item: any) => ({
           id: item.id || item._local_id || `db-${Date.now()}-${Math.random()}`,
-          nombreArchivo: item.nombre_archivo || 'extracto_bancario.pdf',
+          nombreArchivo: item.nombre_archivo || 'comprobante.pdf',
           tamanoArchivo: 0,
           tipoMime: 'application/pdf',
           fechaAnalisis: item.created_at || item._created_at || new Date().toISOString(),
@@ -60,12 +65,15 @@ export function App() {
             origen_billetera: item.origen_billetera || 'No especificado',
             fecha_periodo: item.fecha_periodo || 'Periodo actual',
             monto_total_acumulado: Number(item.monto_total_acumulado) || 0,
-            detalle_movimientos: Array.isArray(item.detalle_movimientos) ? item.detalle_movimientos : []
+            detalle_movimientos: Array.isArray(item.detalle_movimientos) ? item.detalle_movimientos : [],
+            tipo_comprobante: item.tipo_comprobante,
+            info_cupon: item.info_cupon,
+            info_lote: item.info_lote,
           },
           rawJson: JSON.stringify(item, null, 2),
           user_id: item.user_id,
           user_email: item.user_email,
-          facturado: item.facturado || false
+          facturado: item.facturado || false,
         }));
 
         setHistorial(mapped);
@@ -77,6 +85,8 @@ export function App() {
 
   // Auth Initialization on application mount
   useEffect(() => {
+    let activeChannel: any = null;
+
     const initAuth = async () => {
       setIsAuthLoading(true);
       try {
@@ -85,11 +95,11 @@ export function App() {
           if (data?.session?.user) {
             const email = data.session.user.email?.toLowerCase().trim() || '';
             const role: UserRole = email === 'ahilindalila94@gmail.com' ? 'admin_contadora' : 'cliente';
-            
+
             const authenticatedUser = {
               ...data.session.user,
               email,
-              role
+              role,
             };
             setUser(authenticatedUser);
             fetchExtractos(authenticatedUser);
@@ -107,11 +117,11 @@ export function App() {
             const parsed = JSON.parse(localSessionStr);
             const email = (parsed.email || '').toLowerCase().trim();
             const role: UserRole = email === 'ahilindalila94@gmail.com' ? 'admin_contadora' : 'cliente';
-            
+
             const authenticatedUser = {
               ...parsed,
               email,
-              role
+              role,
             };
             setUser(authenticatedUser);
             fetchExtractos(authenticatedUser);
@@ -143,11 +153,11 @@ export function App() {
       if (session?.user) {
         const email = session.user.email?.toLowerCase().trim() || '';
         const role: UserRole = email === 'ahilindalila94@gmail.com' ? 'admin_contadora' : 'cliente';
-        
+
         const authenticatedUser = {
           ...session.user,
           email,
-          role
+          role,
         };
         setUser(authenticatedUser);
         fetchExtractos(authenticatedUser);
@@ -157,8 +167,29 @@ export function App() {
       }
     });
 
+    // Real-time Supabase subscription for Contadora & clients
+    try {
+      activeChannel = supabase
+        .channel('public:extractos')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'extractos' },
+          () => {
+            if (user) {
+              fetchExtractos(user);
+            }
+          }
+        )
+        .subscribe();
+    } catch (realtimeErr) {
+      console.warn('Real-time subscription notice:', realtimeErr);
+    }
+
     return () => {
       authListener?.subscription?.unsubscribe?.();
+      if (activeChannel) {
+        supabase.removeChannel(activeChannel);
+      }
     };
   }, []);
 
@@ -178,16 +209,14 @@ export function App() {
   const handleAuthSuccess = (authenticatedUser: any) => {
     const email = authenticatedUser?.email?.toLowerCase().trim() || '';
     const role: UserRole = email === 'ahilindalila94@gmail.com' ? 'admin_contadora' : 'cliente';
-    
-    const userWithVerifiedRole = {
+
+    const fullUser = {
       ...authenticatedUser,
       email,
-      role
+      role,
     };
-
-    setUser(userWithVerifiedRole);
-    fetchExtractos(userWithVerifiedRole);
-    
+    setUser(fullUser);
+    fetchExtractos(fullUser);
     if (role === 'admin_contadora') {
       setActiveTab('panel_control');
     } else {
@@ -195,19 +224,21 @@ export function App() {
     }
   };
 
-  // Toggle invoice status for Admin Contadora
+  // Toggle billed status in Supabase
   const handleToggleFacturado = async (id: string, currentStatus: boolean) => {
+    const nextStatus = !currentStatus;
     setHistorial((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, facturado: !currentStatus } : item))
+      prev.map((item) => (item.id === id ? { ...item, facturado: nextStatus } : item))
     );
+
     try {
-      await supabase.from('extractos').update({ facturado: !currentStatus }).eq('id', id);
-    } catch (e) {
-      console.error('Error actualizando facturado:', e);
+      await supabase.from('extractos').update({ facturado: nextStatus }).eq('id', id);
+    } catch (err) {
+      console.error('Error actualizando facturado en Supabase:', err);
     }
   };
 
-  // Delete an individual extract
+  // Delete individual record
   const handleDeleteItem = async (id: string) => {
     setHistorial((prev) => prev.filter((item) => item.id !== id));
     try {
@@ -244,7 +275,7 @@ export function App() {
     });
   };
 
-  // Analyze File
+  // Analyze File with Vision AI
   const handleAnalyzeFile = async (file: File) => {
     setIsProcessing(true);
     setAnalysisError(null);
@@ -261,35 +292,23 @@ export function App() {
         else mimeType = 'image/jpeg';
       }
 
-      let requestBody: any = {
-        fileName: file.name,
-        mimeType: mimeType,
-      };
+      let extracted: ComprobanteResultado;
 
       if (mimeType.startsWith('text/') || lowerName.endsWith('.txt') || lowerName.endsWith('.csv')) {
         const text = await file.text();
-        requestBody.rawText = text;
+        extracted = await analyzeComprobanteWithAI({
+          rawText: text,
+          fileName: file.name,
+          mimeType: 'text/plain',
+        });
       } else {
         const base64 = await fileToBase64(file);
-        requestBody.fileData = base64;
+        extracted = await analyzeComprobanteWithAI({
+          fileData: base64,
+          mimeType: mimeType,
+          fileName: file.name,
+        });
       }
-
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          errorData.details || errorData.error || `Error en el servidor (HTTP ${response.status})`
-        );
-      }
-
-      const extracted: ComprobanteResultado = await response.json();
 
       if (!extracted || typeof extracted.monto_total_acumulado === 'undefined') {
         throw new Error('El modelo de IA no devolvió los datos en el formato esperado.');
@@ -307,12 +326,12 @@ export function App() {
         rawJson: JSON.stringify(extracted, null, 2),
         user_id: user?.id || null,
         user_email: user?.email || null,
-        facturado: false
+        facturado: false,
       };
 
       setHistorial((prev) => [newItem, ...prev]);
 
-      // Auto-save to Supabase if logged in
+      // Direct client-side insert into Supabase table 'extractos'
       if (user) {
         const payload = {
           origen_billetera: extracted.origen_billetera,
@@ -320,12 +339,13 @@ export function App() {
           monto_total_acumulado: Number(extracted.monto_total_acumulado),
           detalle_movimientos: extracted.detalle_movimientos,
           nombre_archivo: file.name,
-          user_id: (user.id === 'demo-user-123' || user.isLocalSession) ? null : user.id,
+          user_id: user.id === 'demo-user-123' || user.isLocalSession ? null : user.id,
           user_email: user.email,
-          facturado: false
+          facturado: false,
+          created_at: new Date().toISOString(),
         };
         supabase.from('extractos').insert([payload]).catch((err: any) => {
-          console.warn('Auto insert note:', err);
+          console.warn('Auto insert Supabase note:', err);
         });
       }
     } catch (err: any) {
@@ -345,26 +365,11 @@ export function App() {
     setCurrentFileName('comprobante_texto.txt');
 
     try {
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          rawText: text,
-          fileName: 'texto_transferencia.txt',
-          mimeType: 'text/plain',
-        }),
+      const extracted = await analyzeComprobanteWithAI({
+        rawText: text,
+        fileName: 'texto_transferencia.txt',
+        mimeType: 'text/plain',
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          errorData.details || errorData.error || `Error en el servidor (HTTP ${response.status})`
-        );
-      }
-
-      const extracted: ComprobanteResultado = await response.json();
 
       if (!extracted || typeof extracted.monto_total_acumulado === 'undefined') {
         throw new Error('El modelo de IA no devolvió los datos en el formato esperado.');
@@ -382,12 +387,12 @@ export function App() {
         rawJson: JSON.stringify(extracted, null, 2),
         user_id: user?.id || null,
         user_email: user?.email || null,
-        facturado: false
+        facturado: false,
       };
 
       setHistorial((prev) => [newItem, ...prev]);
 
-      // Auto-save to Supabase if logged in
+      // Direct client insert into Supabase
       if (user) {
         const payload = {
           origen_billetera: extracted.origen_billetera,
@@ -395,12 +400,13 @@ export function App() {
           monto_total_acumulado: Number(extracted.monto_total_acumulado),
           detalle_movimientos: extracted.detalle_movimientos,
           nombre_archivo: 'Carga por Texto',
-          user_id: (user.id === 'demo-user-123' || user.isLocalSession) ? null : user.id,
+          user_id: user.id === 'demo-user-123' || user.isLocalSession ? null : user.id,
           user_email: user.email,
-          facturado: false
+          facturado: false,
+          created_at: new Date().toISOString(),
         };
         supabase.from('extractos').insert([payload]).catch((err: any) => {
-          console.warn('Auto insert note:', err);
+          console.warn('Auto insert Supabase note:', err);
         });
       }
     } catch (err: any) {
@@ -413,45 +419,57 @@ export function App() {
     }
   };
 
-  const handleSelectPreset = (preset: { nombre: string; contenido: string }) => {
+  const handleSelectPreset = (preset: PresetSample) => {
     setActiveTab('analizador');
-    handleAnalyzeText(preset.contenido);
+    if (preset.datosEjemplo.texto) {
+      handleAnalyzeText(preset.datosEjemplo.texto);
+    } else {
+      setResultadoActual(preset.datosEjemplo.resultadoSimulado);
+      setCurrentFileName(`Ejemplo_${preset.entidad}.txt`);
+    }
   };
 
-  const totalAcumuladoGeneral = historial.reduce(
-    (acc, curr) => acc + (curr.resultado.monto_total_acumulado || 0),
-    0
-  );
-
-  const isContadora = user?.role === 'admin_contadora' && user?.email?.trim().toLowerCase() === 'ahilindalila94@gmail.com';
+  const handleClearHistorial = async () => {
+    if (user?.email) {
+      handleResetClient(user.email);
+    } else {
+      setHistorial([]);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-purple-500 selection:text-white">
-      {/* Top Bar Header */}
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-purple-100 selection:text-purple-900">
       <Header
-        historialCount={historial.length}
-        totalAcumuladoHistorial={totalAcumuladoGeneral}
-        onClearHistorial={() => setHistorial([])}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         user={user}
         onLogout={handleLogout}
+        historialCount={historial.length}
       />
 
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
-        
-        {/* Loading Auth State */}
-        {isAuthLoading && (
-          <div className="flex items-center justify-center py-12">
-            <div className="w-8 h-8 border-3 border-purple-500/20 border-t-purple-600 rounded-full animate-spin"></div>
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        {isAuthLoading ? (
+          <div className="flex flex-col items-center justify-center min-h-[300px] text-slate-400">
+            <div className="w-8 h-8 border-3 border-purple-600/30 border-t-purple-600 rounded-full animate-spin mb-3"></div>
+            <p className="text-xs font-semibold">Cargando datos contables...</p>
           </div>
-        )}
-
-        {!isAuthLoading && (
+        ) : (
           <>
-            {/* View: Admin Control Panel (Contadora Only) */}
-            {activeTab === 'panel_control' && isContadora && (
+            {activeTab === 'auth' && (
+              <AuthScreen onAuthSuccess={handleAuthSuccess} onCancel={() => setActiveTab('analizador')} />
+            )}
+
+            {activeTab === 'factura_manual' && (
+              <FacturaManualView
+                user={user}
+                onSuccess={() => {
+                  fetchExtractos(user);
+                  setActiveTab(user?.role === 'admin_contadora' ? 'panel_control' : 'historial');
+                }}
+              />
+            )}
+
+            {activeTab === 'panel_control' && user?.role === 'admin_contadora' && (
               <AdminPanel
                 historial={historial}
                 onToggleFacturado={handleToggleFacturado}
@@ -460,51 +478,8 @@ export function App() {
               />
             )}
 
-            {/* View: Auth Screen */}
-            {activeTab === 'auth' && (
-              <AuthScreen
-                onAuthSuccess={handleAuthSuccess}
-              />
-            )}
-
-            {/* View: Manual Invoice Request */}
-            {activeTab === 'factura_manual' && (
-              <FacturaManualView
-                user={user}
-                onSuccess={() => {
-                  fetchExtractos(user);
-                  setActiveTab('historial');
-                }}
-              />
-            )}
-
-            {/* View: Presets */}
-            {activeTab === 'presets' && (
-              <PresetsView
-                onSelectPreset={handleSelectPreset}
-                isProcessing={isProcessing}
-              />
-            )}
-
-            {/* View: History / Ledger */}
-            {activeTab === 'historial' && (
-              <LedgerHistory
-                historial={historial}
-                onClearAll={() => setHistorial([])}
-                onDeleteItem={handleDeleteItem}
-                onSelectHistorialItem={(item) => {
-                  setResultadoActual(item.resultado);
-                  setCurrentFileName(item.nombreArchivo);
-                  setActiveTab('analizador');
-                }}
-              />
-            )}
-
-            {/* View: Analyzer (Client / Guest default) */}
             {activeTab === 'analizador' && (
               <div className="space-y-6">
-                
-                {/* Upload & Dropzone Area */}
                 <UploadZone
                   onFileSelected={handleAnalyzeFile}
                   onTextSubmitted={handleAnalyzeText}
@@ -521,7 +496,7 @@ export function App() {
                       <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
                       <div className="space-y-1">
                         <h4 className="text-xs font-bold uppercase tracking-wider text-rose-900">
-                          Error al procesar la imagen con IA
+                          Error al procesar el comprobante
                         </h4>
                         <p className="text-xs text-rose-700 leading-relaxed">{analysisError}</p>
                       </div>
@@ -547,32 +522,47 @@ export function App() {
                   </div>
                 )}
 
-                {/* Results Card */}
+                {/* Results Section */}
                 {resultadoActual && (
                   <ResultCard
                     resultado={resultadoActual}
                     fileName={currentFileName}
+                    onUpdateResultado={setResultadoActual}
                     user={user}
                     onGoToAuth={() => setActiveTab('auth')}
-                    onUpdateResultado={(updated) => setResultadoActual(updated)}
                   />
                 )}
               </div>
             )}
+
+            {activeTab === 'historial' && (
+              <LedgerHistory
+                historial={historial}
+                onSelectHistorialItem={(item) => {
+                  setResultadoActual(item.resultado);
+                  setCurrentFileName(item.nombreArchivo);
+                  setActiveTab('analizador');
+                }}
+                onDeleteItem={handleDeleteItem}
+                onClearAll={handleClearHistorial}
+              />
+            )}
+
+            {activeTab === 'presets' && <PresetsView onSelectPreset={handleSelectPreset} />}
           </>
         )}
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-200 bg-white py-6 text-center text-xs text-slate-500">
+      <footer className="border-t border-slate-200/80 bg-white py-6 mt-12 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p className="font-medium">
-            © {new Date().getFullYear()} Cuentas Claras Studio — Estudio Ahilin Torres
-          </p>
+          <p>© {new Date().getFullYear()} Cuentas Claras • Estudio Contable & Conciliación Impositiva</p>
           <div className="flex items-center gap-4 text-slate-400">
-            <span>Privacidad y Aislamiento de Datos AFIP</span>
+            <span>Payway & POSNET</span>
             <span>•</span>
-            <span>Versión 3.7</span>
+            <span>Mercado Pago & Bancos</span>
+            <span>•</span>
+            <span>AFIP / ARCA</span>
           </div>
         </div>
       </footer>
