@@ -1,1 +1,3 @@
-/* /index.html 200
+# Netlify Redirects & Proxies
+/api/*  /.netlify/functions/:splat  200
+/*      /index.html                 200

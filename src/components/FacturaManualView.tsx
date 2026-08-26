@@ -21,6 +21,7 @@ import {
   FileCheck
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { apiUrl, apiFetch } from '../lib/apiConfig';
 
 interface FacturaManualViewProps {
   user: any;
@@ -108,7 +109,7 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
       reader.onload = async () => {
         const base64Data = reader.result as string;
         try {
-          const res = await fetch('/api/analyze', {
+          const res = await apiFetch('/api/analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -225,7 +226,7 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
       });
 
       // 1. Primary Cloud Database Persistence (Authoritative Backend Storage)
-      const srvRes = await fetch('/api/records', {
+      const srvRes = await apiFetch('/api/records', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(recordPayload),
@@ -233,6 +234,9 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
 
       if (!srvRes.ok) {
         const errorText = await srvRes.text().catch(() => 'Error en el servidor');
+        if (srvRes.status === 404 && errorText.includes('<!DOCTYPE')) {
+          throw new Error('Error de conexión con el backend (404). Si estás usando Netlify, verificá que VITE_API_URL apunte al servidor backend.');
+        }
         throw new Error(`Error en el servidor central (${srvRes.status}): ${errorText}`);
       }
 

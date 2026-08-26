@@ -13,6 +13,7 @@ import {
   saveFacturaArca,
   deleteFacturaArca,
 } from './lib/supabase';
+import { apiUrl, apiFetch } from './lib/apiConfig';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<ActiveTabType>('factura_manual');
@@ -54,10 +55,10 @@ export function App() {
 
       // 0. Primary Server API Records (cross-device sync across mobile & desktop)
       try {
-        const recordsUrl = isContadora
+        const recordsEndpoint = isContadora
           ? '/api/records'
           : `/api/records?email=${encodeURIComponent(currentUser.email?.toLowerCase().trim())}`;
-        const recRes = await fetch(recordsUrl);
+        const recRes = await apiFetch(recordsEndpoint);
         if (recRes.ok) {
           const recData = await recRes.json();
           if (recData.records && Array.isArray(recData.records)) {
@@ -366,7 +367,7 @@ export function App() {
     );
 
     try {
-      fetch(`/api/records/${encodeURIComponent(id)}`, {
+      apiFetch(`/api/records/${encodeURIComponent(id)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ facturado: nextStatus }),
@@ -383,7 +384,7 @@ export function App() {
   const handleDeleteItem = async (id: string) => {
     setHistorial((prev) => prev.filter((item) => item.id !== id));
     try {
-      fetch(`/api/records/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
+      apiFetch(`/api/records/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
       await supabase.from('receipts').delete().eq('id', id);
       await supabase.from('extractos').delete().eq('id', id);
     } catch (e) {
@@ -398,8 +399,8 @@ export function App() {
     
     // Also remove from backend server records and client registry
     try {
-      fetch(`/api/clients/${encodeURIComponent(cleanEmail)}`, { method: 'DELETE' }).catch(() => {});
-      fetch(`/api/records/by-client/${encodeURIComponent(cleanEmail)}`, { method: 'DELETE' }).catch(() => {});
+      apiFetch(`/api/clients/${encodeURIComponent(cleanEmail)}`, { method: 'DELETE' }).catch(() => {});
+      apiFetch(`/api/records/by-client/${encodeURIComponent(cleanEmail)}`, { method: 'DELETE' }).catch(() => {});
     } catch (e) {}
 
     // Remove from local storage registry
@@ -450,7 +451,7 @@ export function App() {
       );
 
       try {
-        fetch('/api/records/batch-facturar', {
+        apiFetch('/api/records/batch-facturar', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: clientEmail, facturado: true }),

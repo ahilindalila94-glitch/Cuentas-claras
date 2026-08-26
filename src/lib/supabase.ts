@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { apiUrl, apiFetch } from './apiConfig';
 
 const rawUrl = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://exatizvvaynuhyxpvrik.supabase.co';
 const rawKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
@@ -399,7 +400,7 @@ export const supabase = {
             try {
               if (queryType === 'insert') {
                 const itemsToSave = Array.isArray(insertData) ? insertData : [insertData];
-                const res = await fetch('/api/records', {
+                const res = await apiFetch('/api/records', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify(itemsToSave),
@@ -414,13 +415,13 @@ export const supabase = {
                 const idFilter = filters.find((f) => f.col === 'id');
                 const emailFilter = filters.find((f) => f.col === 'user_email');
                 if (idFilter) {
-                  await fetch(`/api/records/${encodeURIComponent(idFilter.val)}`, {
+                  await apiFetch(`/api/records/${encodeURIComponent(idFilter.val)}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(updateValues),
                   });
                 } else if (emailFilter && updateValues.facturado !== undefined) {
-                  await fetch('/api/records/batch-facturar', {
+                  await apiFetch('/api/records/batch-facturar', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email: emailFilter.val, facturado: updateValues.facturado }),
@@ -433,11 +434,11 @@ export const supabase = {
                 const idFilter = filters.find((f) => f.col === 'id');
                 const emailFilter = filters.find((f) => f.col === 'user_email');
                 if (idFilter) {
-                  await fetch(`/api/records/${encodeURIComponent(idFilter.val)}`, {
+                  await apiFetch(`/api/records/${encodeURIComponent(idFilter.val)}`, {
                     method: 'DELETE',
                   });
                 } else if (emailFilter) {
-                  await fetch(`/api/records/by-client/${encodeURIComponent(emailFilter.val)}`, {
+                  await apiFetch(`/api/records/by-client/${encodeURIComponent(emailFilter.val)}`, {
                     method: 'DELETE',
                   });
                 }
@@ -446,8 +447,8 @@ export const supabase = {
                 return result;
               } else if (queryType === 'select') {
                 const emailFilter = filters.find((f) => f.col === 'user_email');
-                const url = emailFilter ? `/api/records?email=${encodeURIComponent(emailFilter.val)}` : '/api/records';
-                const res = await fetch(url);
+                const endpoint = emailFilter ? `/api/records?email=${encodeURIComponent(emailFilter.val)}` : '/api/records';
+                const res = await apiFetch(endpoint);
                 if (res.ok) {
                   const data = await res.json();
                   let records = data.records || [];
@@ -617,7 +618,7 @@ export const recordRegisteredClient = async (clientData: {
 
   // 2. Sync to Backend API
   try {
-    fetch('/api/clients/register', {
+    apiFetch('/api/clients/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -670,7 +671,7 @@ export const fetchRegisteredClients = async (): Promise<any[]> => {
 
   // 1. Fetch from backend API
   try {
-    const res = await fetch('/api/clients');
+    const res = await apiFetch('/api/clients');
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data.clients)) {
@@ -745,8 +746,8 @@ export const fetchFacturasArca = async (clientEmail?: string): Promise<any[]> =>
 
   // 1. Fetch from server API
   try {
-    const url = cleanEmail ? `/api/facturas-arca?email=${encodeURIComponent(cleanEmail)}` : '/api/facturas-arca';
-    const res = await fetch(url);
+    const endpoint = cleanEmail ? `/api/facturas-arca?email=${encodeURIComponent(cleanEmail)}` : '/api/facturas-arca';
+    const res = await apiFetch(endpoint);
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data.facturas)) {
@@ -819,7 +820,7 @@ export const saveFacturaArca = async (facturaData: any): Promise<any> => {
 
   // 2. Post to server
   try {
-    await fetch('/api/facturas-arca', {
+    await apiFetch('/api/facturas-arca', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(itemToSave),
@@ -851,7 +852,7 @@ export const deleteFacturaArca = async (id: string): Promise<boolean> => {
 
   // 2. Delete from server
   try {
-    await fetch(`/api/facturas-arca/${id}`, { method: 'DELETE' });
+    await apiFetch(`/api/facturas-arca/${id}`, { method: 'DELETE' });
   } catch (e) {}
 
   // 3. Delete from Supabase

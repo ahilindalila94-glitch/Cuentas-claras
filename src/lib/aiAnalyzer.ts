@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { ComprobanteResultado } from '../types';
+import { apiFetch } from './apiConfig';
 
 export const SYSTEM_INSTRUCTION_CONTABLE = `Sos un asistente contable y perito en visión de comprobantes fiscales y comerciales para Argentina (AFIP / ARCA), billeteras virtuales y terminales de pago POS (POSNET, Payway, Getnet, Lapos, Mercado Pago Point, Clover, etc.).
 
@@ -191,7 +192,7 @@ export async function analyzeComprobanteWithAI(params: {
 
   // 1. Try server API route first
   try {
-    const serverResponse = await fetch('/api/analyze', {
+    const serverResponse = await apiFetch('/api/analyze', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

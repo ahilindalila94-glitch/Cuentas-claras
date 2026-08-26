@@ -28,6 +28,7 @@ import { ItemHistorial, RegisteredClient, FacturaArca } from '../types';
 import { formatCurrencyARS } from '../utils/formatters';
 import { SubirFacturaArcaModal } from './SubirFacturaArcaModal';
 import { FacturasArcaList } from './FacturasArcaList';
+import { apiFetch } from '../lib/apiConfig';
 
 interface AdminPanelProps {
   historial: ItemHistorial[];
@@ -72,7 +73,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Poll / fetch notifications on mount and refresh
   const fetchNotifications = async () => {
     try {
-      const res = await fetch('/api/notifications');
+      const res = await apiFetch('/api/notifications');
       if (res.ok) {
         const data = await res.json();
         setNotifications(data.notifications || []);
@@ -91,7 +92,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const handleMarkAllRead = async () => {
     try {
-      await fetch('/api/notifications/mark-read', {
+      await apiFetch('/api/notifications/mark-read', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
@@ -131,7 +132,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     e.stopPropagation();
     setSendingEmail((prev) => ({ ...prev, [email]: true }));
     try {
-      const response = await fetch('/api/send-reminder', {
+      const response = await apiFetch('/api/send-reminder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, pendingAmount }),
