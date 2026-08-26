@@ -59,6 +59,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [sendingEmail, setSendingEmail] = useState<Record<string, boolean>>({});
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showNotifications, setShowNotifications] = useState(false);
   const [selectedClientForArca, setSelectedClientForArca] = useState<{
     email: string;
     nombre_comercio?: string;
@@ -66,10 +69,42 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     pendingAmount?: number;
   } | null>(null);
 
+  // Poll / fetch notifications on mount and refresh
+  const fetchNotifications = async () => {
+    try {
+      const res = await fetch('/api/notifications');
+      if (res.ok) {
+        const data = await res.json();
+        setNotifications(data.notifications || []);
+        setUnreadCount(data.unreadCount || 0);
+      }
+    } catch (e) {
+      console.warn('Aviso obteniendo notificaciones:', e);
+    }
+  };
+
+  React.useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleMarkAllRead = async () => {
+    try {
+      await fetch('/api/notifications/mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      setUnreadCount(0);
+      setNotifications((prev) => prev.map((n) => ({ ...n, leido: true })));
+    } catch (e) {}
+  };
+
   const handleManualRefresh = async () => {
     if (onRefresh) {
       setIsRefreshing(true);
-      await onRefresh();
+      await Promise.all([onRefresh(), fetchNotifications()]);
       setTimeout(() => setIsRefreshing(false), 500);
     }
   };
@@ -397,6 +432,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               />
             </div>
 
+            {/* Notifications Bell */}
+            <button
+              type="button"
+              onClick={() => setShowNotifications(!showNotifications)}
+              className={`relative p-2.5 rounded-xl border transition-all flex items-center justify-center shrink-0 cursor-pointer ${
+                unreadCount > 0
+                  ? 'bg-purple-600 text-white border-purple-600 shadow-sm animate-pulse'
+                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+              }`}
+              title="Alertas y Notificaciones de Clientes"
+            >
+              <AlertCircle className="w-4 h-4" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white font-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center border-2 border-white">
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+
             {/* Refresh button */}
             {onRefresh && (
               <button
@@ -411,6 +465,64 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             )}
           </div>
         </div>
+
+        {/* Real-time Notifications Banner / Dropdown */}
+        {showNotifications && (
+          <div className="mt-4 p-4 bg-purple-50/70 border border-purple-200 rounded-2xl animate-in fade-in space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-purple-600 animate-ping" />
+                <h4 className="text-xs font-black text-purple-950 uppercase tracking-wider">
+                  Bandeja de Alertas Recientes (Nuevos Registros y Comprobantes)
+                </h4>
+              </div>
+              <div className="flex items-center gap-2">
+                {unreadCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleMarkAllRead}
+                    className="text-[11px] font-bold text-purple-700 hover:text-purple-950 underline cursor-pointer"
+                  >
+                    Marcar todas como leídas
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowNotifications(false)}
+                  className="text-slate-400 hover:text-slate-600 text-xs font-bold px-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {notifications.length === 0 ? (
+              <p className="text-xs text-slate-500 italic">No hay alertas pendientes en este momento.</p>
+            ) : (
+              <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+                {notifications.map((n) => (
+                  <div
+                    key={n.id}
+                    className={`p-3 rounded-xl border text-xs flex items-start justify-between gap-3 ${
+                      !n.leido ? 'bg-white border-purple-300 shadow-xs' : 'bg-white/60 border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    <div className="space-y-0.5">
+                      <p className="font-bold text-slate-900 flex items-center gap-1.5">
+                        <span className="text-purple-600">🔔</span>
+                        {n.titulo}
+                      </p>
+                      <p className="text-slate-600 text-[11px]">{n.mensaje}</p>
+                      <p className="text-[10px] text-slate-400 font-mono">
+                        {new Date(n.fecha).toLocaleString('es-AR')}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Global Stats Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">

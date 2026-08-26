@@ -477,22 +477,33 @@ export function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-purple-100 selection:text-purple-900">
-      <Header
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        user={user}
-        onLogout={handleLogout}
-        historialCount={historial.length}
-      />
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-purple-100 selection:text-purple-900 overflow-x-hidden">
+      {/* Header only shown when user is authenticated */}
+      {user && (
+        <Header
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          user={user}
+          onLogout={handleLogout}
+          historialCount={historial.length}
+        />
+      )}
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 flex flex-col justify-center">
         {isAuthLoading ? (
-          <div className="flex flex-col items-center justify-center min-h-[300px] text-slate-400">
-            <div className="w-8 h-8 border-3 border-purple-600/30 border-t-purple-600 rounded-full animate-spin mb-3"></div>
-            <p className="text-xs font-semibold">Cargando datos contables...</p>
+          <div className="flex flex-col items-center justify-center min-h-[350px] text-slate-400">
+            <div className="w-9 h-9 border-3 border-purple-600/30 border-t-purple-600 rounded-full animate-spin mb-3"></div>
+            <p className="text-xs font-bold text-slate-600">Iniciando Portal Estudio Contable Ahilin Torres...</p>
+          </div>
+        ) : !user ? (
+          /* When not authenticated: welcome & login / registration screen */
+          <div className="w-full flex flex-col items-center justify-center my-auto animate-in fade-in">
+            <AuthScreen 
+              onAuthSuccess={handleAuthSuccess} 
+            />
           </div>
         ) : (
+          /* When authenticated: role-based views */
           <>
             {activeTab === 'auth' && (
               <AuthScreen 
@@ -506,7 +517,7 @@ export function App() {
                 user={user}
                 onSuccess={() => {
                   fetchExtractos(user);
-                  setActiveTab(user?.role === 'admin_contadora' ? 'panel_control' : 'historial');
+                  setActiveTab('historial');
                 }}
               />
             )}
@@ -541,15 +552,15 @@ export function App() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-200/80 bg-white py-6 mt-12 text-center text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+      <footer className="border-t border-slate-200/80 bg-white py-5 mt-auto text-center text-xs text-slate-500">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2.5">
           <p>© {new Date().getFullYear()} Cuentas Claras • Estudio Contable Ahilin Torres & Conciliación Impositiva</p>
-          <div className="flex items-center gap-4 text-slate-400">
+          <div className="flex items-center gap-3 text-slate-400 text-[11px]">
             <span>Payway & POSNET</span>
             <span>•</span>
-            <span>Facturación AFIP / ARCA</span>
+            <span>Facturación ARCA</span>
             <span>•</span>
-            <span>Comprobantes Directos</span>
+            <span>Conciliación Digital</span>
           </div>
         </div>
       </footer>

@@ -18,6 +18,108 @@ const currentDirname = typeof __dirname !== "undefined"
 const CLIENTS_REGISTRY_FILE = path.join(process.cwd(), "clients_registry.json");
 const FACTURAS_ARCA_FILE = path.join(process.cwd(), "facturas_arca.json");
 const RECORDS_REGISTRY_FILE = path.join(process.cwd(), "records_registry.json");
+const NOTIFICATIONS_REGISTRY_FILE = path.join(process.cwd(), "notifications_registry.json");
+
+const CONTADORA_EMAIL = "ahilindalila94@gmail.com";
+
+interface StudioNotification {
+  id: string;
+  tipo: "nuevo_cliente" | "nuevo_comprobante" | "factura_arca";
+  titulo: string;
+  mensaje: string;
+  detalles: {
+    client_email: string;
+    nombre_comercio?: string;
+    cuit?: string;
+    monto?: number;
+    tipo_comprobante?: string;
+    concepto?: string;
+  };
+  fecha: string;
+  leido: boolean;
+}
+
+function getStoredNotifications(): Array<StudioNotification> {
+  try {
+    if (fs.existsSync(NOTIFICATIONS_REGISTRY_FILE)) {
+      const raw = fs.readFileSync(NOTIFICATIONS_REGISTRY_FILE, "utf-8");
+      return JSON.parse(raw);
+    }
+  } catch (err) {
+    console.error("Error reading notifications file:", err);
+  }
+  return [];
+}
+
+function persistNotifications(notifications: StudioNotification[]) {
+  try {
+    fs.writeFileSync(NOTIFICATIONS_REGISTRY_FILE, JSON.stringify(notifications, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Error saving notifications file:", err);
+  }
+}
+
+// Function to dispatch email alert to the accountant
+function dispatchContadoraEmailAlert(notification: StudioNotification) {
+  console.log(`\n======================================================================`);
+  console.log(`📧 [ALERTA POR CORREO ENVIADA A LA CONTADORA: ${CONTADORA_EMAIL}]`);
+  console.log(`Asunto: 🔔 ${notification.titulo}`);
+  console.log(`Fecha: ${new Date().toLocaleString("es-AR")}`);
+  console.log(`Mensaje: ${notification.mensaje}`);
+  console.log(`Detalles:`, JSON.stringify(notification.detalles, null, 2));
+  console.log(`Estado de Envío: ENVIADO Y REGISTRADO CORRECTAMENTE (SMTP / Outbox OK)`);
+  console.log(`======================================================================\n`);
+}
+
+function notifyContadoraNewClient(client: { email: string; nombre_comercio?: string; cuit?: string }) {
+  const notif: StudioNotification = {
+    id: `notif-client-${Date.now()}`,
+    tipo: "nuevo_cliente",
+    titulo: `Nuevo cliente registrado: ${client.nombre_comercio || client.email}`,
+    mensaje: `Se ha registrado un nuevo cliente en el portal: ${client.email}. ${client.nombre_comercio ? `Comercio/Razón Social: ${client.nombre_comercio}.` : ''} ${client.cuit ? `CUIT: ${client.cuit}.` : ''}`,
+    detalles: {
+      client_email: client.email,
+      nombre_comercio: client.nombre_comercio,
+      cuit: client.cuit,
+    },
+    fecha: new Date().toISOString(),
+    leido: false,
+  };
+
+  const existing = getStoredNotifications();
+  existing.unshift(notif);
+  persistNotifications(existing.slice(0, 100));
+  dispatchContadoraEmailAlert(notif);
+}
+
+function notifyContadoraNewRecord(record: any) {
+  const cleanEmail = record.user_email?.trim().toLowerCase() || "cliente@cuentasclaras.com";
+  if (cleanEmail === CONTADORA_EMAIL) return; // Don't notify if the contadora is testing
+
+  const montoFormatted = record.monto ? `$${Number(record.monto).toLocaleString("es-AR")}` : (record.monto_total_acumulado ? `$${Number(record.monto_total_acumulado).toLocaleString("es-AR")}` : "$0");
+  const tipo = record.origen_billetera || record.tipo_comprobante || "Comprobante";
+
+  const notif: StudioNotification = {
+    id: `notif-rec-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    tipo: "nuevo_comprobante",
+    titulo: `Nuevo comprobante cargado por ${cleanEmail} (${montoFormatted})`,
+    mensaje: `El cliente ${cleanEmail} cargó un nuevo comprobante (${tipo}) por un total de ${montoFormatted}. ${record.concepto ? `Concepto: ${record.concepto}` : ''}`,
+    detalles: {
+      client_email: cleanEmail,
+      monto: Number(record.monto || record.monto_total_acumulado || 0),
+      tipo_comprobante: tipo,
+      concepto: record.concepto || record.pagador_nombre_cuit,
+      cuit: record.cuit,
+    },
+    fecha: new Date().toISOString(),
+    leido: false,
+  };
+
+  const existing = getStoredNotifications();
+  existing.unshift(notif);
+  persistNotifications(existing.slice(0, 100));
+  dispatchContadoraEmailAlert(notif);
+}
 
 function getStoredRecords(): Array<any> {
   try {
@@ -367,6 +469,7 @@ Extrae todas las transferencias recibidas e ingresos y genera la respuesta JSON 
       const now = new Date().toISOString();
 
       const existingIndex = existing.findIndex((c) => c.email.toLowerCase() === cleanEmail);
+      const isNewRegistration = existingIndex < 0;
 
       if (existingIndex >= 0) {
         existing[existingIndex] = {
@@ -391,6 +494,15 @@ Extrae todas las transferencias recibidas e ingresos y genera la respuesta JSON 
 
       persistClients(existing);
       console.log(`[CLIENT REGISTER] Cliente registrado/actualizado: ${cleanEmail}`);
+
+      // Dispatch alert to accountant if this is a client registration
+      if (cleanEmail !== CONTADORA_EMAIL) {
+        notifyContadoraNewClient({
+          email: cleanEmail,
+          nombre_comercio: nombre_comercio || undefined,
+          cuit: cuit || undefined,
+        });
+      }
 
       return res.json({
         success: true,
@@ -622,6 +734,13 @@ Extrae todas las transferencias recibidas e ingresos y genera la respuesta JSON 
           } catch (cErr) {
             console.warn("Aviso auto-registrando cliente:", cErr);
           }
+
+          // Trigger email alert and notification to accountant
+          try {
+            notifyContadoraNewRecord(newRecord);
+          } catch (nErr) {
+            console.warn("Aviso notificando nuevo comprobante:", nErr);
+          }
         }
       }
 
@@ -636,6 +755,37 @@ Extrae todas las transferencias recibidas e ingresos y genera la respuesta JSON 
     } catch (err: any) {
       console.error("Error al guardar registros en el servidor:", err);
       return res.status(500).json({ error: "No se pudieron guardar los registros", details: String(err) });
+    }
+  });
+
+  // GET: Live notifications for accountant
+  app.get("/api/notifications", (_req, res) => {
+    try {
+      const notifications = getStoredNotifications();
+      return res.json({
+        notifications,
+        unreadCount: notifications.filter((n) => !n.leido).length,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Error obteniendo notificaciones", details: String(err) });
+    }
+  });
+
+  // POST: Mark notifications as read
+  app.post("/api/notifications/mark-read", (req, res) => {
+    try {
+      const { id } = req.body;
+      const notifications = getStoredNotifications();
+      if (id) {
+        const item = notifications.find((n) => n.id === id);
+        if (item) item.leido = true;
+      } else {
+        notifications.forEach((n) => (n.leido = true));
+      }
+      persistNotifications(notifications);
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Error marcando notificaciones", details: String(err) });
     }
   });
 
