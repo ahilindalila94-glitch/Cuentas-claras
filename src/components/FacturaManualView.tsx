@@ -108,7 +108,7 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
       reader.onload = async () => {
         const base64Data = reader.result as string;
         try {
-          const res = await fetch('/api/analyze-extracto', {
+          const res = await fetch('/api/analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -120,8 +120,8 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
 
           if (res.ok) {
             const data = await res.json();
-            if (data.analysis) {
-              const a = data.analysis;
+            const a = data.analysis || data;
+            if (a) {
               if (a.monto_total_acumulado) {
                 setMonto(String(a.monto_total_acumulado));
               }
@@ -148,14 +148,14 @@ export const FacturaManualView: React.FC<FacturaManualViewProps> = ({ user, onSu
             }
           }
         } catch (apiErr) {
-          console.warn('Aviso procesando IA:', apiErr);
+          console.warn('Aviso procesando IA de comprobante:', apiErr);
         } finally {
           setIsAnalyzingAi(false);
         }
       };
       reader.readAsDataURL(file);
     } catch (e) {
-      console.error(e);
+      console.error('Error leyendo archivo:', e);
       setIsAnalyzingAi(false);
     }
   };

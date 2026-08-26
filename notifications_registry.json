@@ -1,0 +1,47 @@
+[
+  {
+    "id": "notif-rec-1787755115864-1zyc",
+    "tipo": "nuevo_comprobante",
+    "titulo": "Nuevo comprobante cargado por comercio_movil@gmail.com ($85.000)",
+    "mensaje": "El cliente comercio_movil@gmail.com cargó un nuevo comprobante (Factura) por un total de $85.000. Concepto: Factura Venta - Cliente Movil",
+    "detalles": {
+      "client_email": "comercio_movil@gmail.com",
+      "monto": 85000,
+      "tipo_comprobante": "Factura",
+      "concepto": "Factura Venta - Cliente Movil",
+      "cuit": "20-33445566-7"
+    },
+    "fecha": "2026-08-26T14:38:35.864Z",
+    "leido": false
+  },
+  {
+    "id": "notif-rec-1787755081184-gim9",
+    "tipo": "nuevo_comprobante",
+    "titulo": "Nuevo comprobante cargado por cliente_movil@gmail.com ($35.000)",
+    "mensaje": "El cliente cliente_movil@gmail.com cargó un nuevo comprobante (POSNET / Payway) por un total de $35.000. Concepto: Ticket POSNET - Prueba Celular",
+    "detalles": {
+      "client_email": "cliente_movil@gmail.com",
+      "monto": 35000,
+      "tipo_comprobante": "POSNET / Payway",
+      "concepto": "Ticket POSNET - Prueba Celular",
+      "cuit": "20-98765432-1"
+    },
+    "fecha": "2026-08-26T14:38:01.184Z",
+    "leido": false
+  },
+  {
+    "id": "notif-rec-1787754992151-sgpr",
+    "tipo": "nuevo_comprobante",
+    "titulo": "Nuevo comprobante cargado por cliente_test@gmail.com ($1.000)",
+    "mensaje": "El cliente cliente_test@gmail.com cargó un nuevo comprobante (Comprobante) por un total de $1.000. Concepto: Prueba",
+    "detalles": {
+      "client_email": "cliente_test@gmail.com",
+      "monto": 1000,
+      "tipo_comprobante": "Comprobante",
+      "concepto": "Prueba",
+      "cuit": "20-12345678-9"
+    },
+    "fecha": "2026-08-26T14:36:32.151Z",
+    "leido": false
+  }
+]

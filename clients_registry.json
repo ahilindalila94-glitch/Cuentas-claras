@@ -1,0 +1,28 @@
+[
+  {
+    "id": "client-1787754992135-k43t",
+    "email": "cliente_test@gmail.com",
+    "cuit": "20-12345678-9",
+    "role": "cliente",
+    "created_at": "2026-08-26T14:36:32.135Z",
+    "last_active": "2026-08-26T14:36:32.135Z"
+  },
+  {
+    "id": "client-1787755081169-xu8d",
+    "email": "cliente_movil@gmail.com",
+    "nombre_comercio": "Cliente cliente_movil",
+    "cuit": "20-98765432-1",
+    "role": "cliente",
+    "created_at": "2026-08-26T14:38:01.168Z",
+    "last_active": "2026-08-26T14:38:01.168Z"
+  },
+  {
+    "id": "client-1787755115849-phqc",
+    "email": "comercio_movil@gmail.com",
+    "nombre_comercio": "Cliente comercio_movil",
+    "cuit": "20-33445566-7",
+    "role": "cliente",
+    "created_at": "2026-08-26T14:38:35.849Z",
+    "last_active": "2026-08-26T14:38:35.849Z"
+  }
+]
