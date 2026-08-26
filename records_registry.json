@@ -1,5 +1,16 @@
 [
   {
+    "id": "test-sync-1787756313089",
+    "cuit": "20-11223344-5",
+    "monto": 50000,
+    "concepto": "Venta Mostrador",
+    "origen_billetera": "Efectivo / Transferencia",
+    "tipo_comprobante": "factura_manual",
+    "user_email": "cliente_final@gmail.com",
+    "created_at": "2026-08-26T14:58:33.211Z",
+    "facturado": false
+  },
+  {
     "id": "rec-mobile-iphone-1787755115721",
     "cuit": "20-33445566-7",
     "monto": 85000,

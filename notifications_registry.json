@@ -1,5 +1,20 @@
 [
   {
+    "id": "notif-rec-1787756313226-7d0k",
+    "tipo": "nuevo_comprobante",
+    "titulo": "Nuevo comprobante cargado por cliente_final@gmail.com ($50.000)",
+    "mensaje": "El cliente cliente_final@gmail.com cargó un nuevo comprobante (Efectivo / Transferencia) por un total de $50.000. Concepto: Venta Mostrador",
+    "detalles": {
+      "client_email": "cliente_final@gmail.com",
+      "monto": 50000,
+      "tipo_comprobante": "Efectivo / Transferencia",
+      "concepto": "Venta Mostrador",
+      "cuit": "20-11223344-5"
+    },
+    "fecha": "2026-08-26T14:58:33.226Z",
+    "leido": false
+  },
+  {
     "id": "notif-rec-1787755115864-1zyc",
     "tipo": "nuevo_comprobante",
     "titulo": "Nuevo comprobante cargado por comercio_movil@gmail.com ($85.000)",
@@ -12,7 +27,7 @@
       "cuit": "20-33445566-7"
     },
     "fecha": "2026-08-26T14:38:35.864Z",
-    "leido": false
+    "leido": true
   },
   {
     "id": "notif-rec-1787755081184-gim9",
@@ -27,7 +42,7 @@
       "cuit": "20-98765432-1"
     },
     "fecha": "2026-08-26T14:38:01.184Z",
-    "leido": false
+    "leido": true
   },
   {
     "id": "notif-rec-1787754992151-sgpr",
@@ -42,6 +57,6 @@
       "cuit": "20-12345678-9"
     },
     "fecha": "2026-08-26T14:36:32.151Z",
-    "leido": false
+    "leido": true
   }
 ]
