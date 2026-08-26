@@ -73,37 +73,39 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="hidden md:flex items-center gap-4">
             <nav className="flex items-center bg-slate-800/80 p-1 rounded-xl border border-slate-700/60 gap-1">
               
-              {/* Contadora Admin Tab */}
+              {/* Contadora Admin Tab (Primary for Estudio Contable) */}
               {isContadora && (
                 <button
                   id="tab-panel_control"
                   type="button"
                   onClick={() => handleTabClick('panel_control')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
                     activeTab === 'panel_control'
                       ? 'bg-purple-600 text-white shadow-xs'
                       : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
                   }`}
                 >
-                  <Briefcase className="w-3.5 h-3.5" />
-                  <span>Panel Contadora</span>
+                  <Briefcase className="w-3.5 h-3.5 text-purple-300" />
+                  <span>Panel Contadora (Clientes & Conciliación)</span>
                 </button>
               )}
 
-              {/* Main Carga Manual Module */}
-              <button
-                id="tab-factura_manual"
-                type="button"
-                onClick={() => handleTabClick('factura_manual')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                  activeTab === 'factura_manual'
-                    ? 'bg-purple-600 text-white shadow-xs'
-                    : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
-                }`}
-              >
-                <Receipt className="w-3.5 h-3.5 text-purple-300" />
-                <span>Cargar Comprobantes</span>
-              </button>
+              {/* Main Carga Manual Module (Clients Only) */}
+              {!isContadora && (
+                <button
+                  id="tab-factura_manual"
+                  type="button"
+                  onClick={() => handleTabClick('factura_manual')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                    activeTab === 'factura_manual'
+                      ? 'bg-purple-600 text-white shadow-xs'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
+                  }`}
+                >
+                  <Receipt className="w-3.5 h-3.5 text-purple-300" />
+                  <span>Cargar Comprobantes</span>
+                </button>
+              )}
 
               {/* Shared Historial Tab */}
               <button
@@ -194,22 +196,24 @@ export const Header: React.FC<HeaderProps> = ({
                   }`}
                 >
                   <Briefcase className="w-4 h-4 text-purple-400" />
-                  <span>Panel Contadora</span>
+                  <span>Panel Contadora (Clientes & Conciliación)</span>
                 </button>
               )}
 
-              <button
-                type="button"
-                onClick={() => handleTabClick('factura_manual')}
-                className={`w-full py-3 px-4 rounded-xl text-xs font-black flex items-center gap-3 transition-all cursor-pointer ${
-                  activeTab === 'factura_manual'
-                    ? 'bg-purple-600 text-white shadow-md'
-                    : 'text-slate-300 bg-slate-900/50 hover:bg-slate-850'
-                }`}
-              >
-                <Receipt className="w-4 h-4 text-purple-300" />
-                <span>Cargar Comprobantes</span>
-              </button>
+              {!isContadora && (
+                <button
+                  type="button"
+                  onClick={() => handleTabClick('factura_manual')}
+                  className={`w-full py-3 px-4 rounded-xl text-xs font-black flex items-center gap-3 transition-all cursor-pointer ${
+                    activeTab === 'factura_manual'
+                      ? 'bg-purple-600 text-white shadow-md'
+                      : 'text-slate-300 bg-slate-900/50 hover:bg-slate-850'
+                  }`}
+                >
+                  <Receipt className="w-4 h-4 text-purple-300" />
+                  <span>Cargar Comprobantes</span>
+                </button>
+              )}
 
               <button
                 type="button"

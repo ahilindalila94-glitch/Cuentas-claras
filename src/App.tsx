@@ -52,6 +52,22 @@ export function App() {
 
       const allRecords: any[] = [];
 
+      // 0. Primary Server API Records (cross-device sync across mobile & desktop)
+      try {
+        const recordsUrl = isContadora
+          ? '/api/records'
+          : `/api/records?email=${encodeURIComponent(currentUser.email?.toLowerCase().trim())}`;
+        const recRes = await fetch(recordsUrl);
+        if (recRes.ok) {
+          const recData = await recRes.json();
+          if (recData.records && Array.isArray(recData.records)) {
+            allRecords.push(...recData.records);
+          }
+        }
+      } catch (recErr) {
+        console.warn('Aviso consultando /api/records:', recErr);
+      }
+
       if (isContadora) {
         // Fetch all registered clients
         try {
@@ -342,7 +358,7 @@ export function App() {
     }
   };
 
-  // Toggle billed status in Supabase
+  // Toggle billed status across Server API and Supabase
   const handleToggleFacturado = async (id: string, currentStatus: boolean) => {
     const nextStatus = !currentStatus;
     setHistorial((prev) =>
@@ -350,10 +366,16 @@ export function App() {
     );
 
     try {
+      fetch(`/api/records/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ facturado: nextStatus }),
+      }).catch(() => {});
+
       await supabase.from('receipts').update({ facturado: nextStatus }).eq('id', id);
       await supabase.from('extractos').update({ facturado: nextStatus }).eq('id', id);
     } catch (err) {
-      console.error('Error actualizando facturado en Supabase:', err);
+      console.error('Error actualizando facturado en base de datos:', err);
     }
   };
 
@@ -361,6 +383,7 @@ export function App() {
   const handleDeleteItem = async (id: string) => {
     setHistorial((prev) => prev.filter((item) => item.id !== id));
     try {
+      fetch(`/api/records/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
       await supabase.from('receipts').delete().eq('id', id);
       await supabase.from('extractos').delete().eq('id', id);
     } catch (e) {
@@ -373,9 +396,10 @@ export function App() {
     const cleanEmail = email.toLowerCase().trim();
     setHistorial((prev) => prev.filter((item) => item.user_email?.toLowerCase().trim() !== cleanEmail));
     
-    // Also remove from backend client registry
+    // Also remove from backend server records and client registry
     try {
       fetch(`/api/clients/${encodeURIComponent(cleanEmail)}`, { method: 'DELETE' }).catch(() => {});
+      fetch(`/api/records/by-client/${encodeURIComponent(cleanEmail)}`, { method: 'DELETE' }).catch(() => {});
     } catch (e) {}
 
     // Remove from local storage registry
@@ -426,6 +450,12 @@ export function App() {
       );
 
       try {
+        fetch('/api/records/batch-facturar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: clientEmail, facturado: true }),
+        }).catch(() => {});
+
         await supabase
           .from('receipts')
           .update({ facturado: true })

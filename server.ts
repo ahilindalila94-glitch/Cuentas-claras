@@ -17,6 +17,27 @@ const currentDirname = typeof __dirname !== "undefined"
 
 const CLIENTS_REGISTRY_FILE = path.join(process.cwd(), "clients_registry.json");
 const FACTURAS_ARCA_FILE = path.join(process.cwd(), "facturas_arca.json");
+const RECORDS_REGISTRY_FILE = path.join(process.cwd(), "records_registry.json");
+
+function getStoredRecords(): Array<any> {
+  try {
+    if (fs.existsSync(RECORDS_REGISTRY_FILE)) {
+      const raw = fs.readFileSync(RECORDS_REGISTRY_FILE, "utf-8");
+      return JSON.parse(raw);
+    }
+  } catch (err) {
+    console.error("Error reading records registry file:", err);
+  }
+  return [];
+}
+
+function persistRecords(records: any[]) {
+  try {
+    fs.writeFileSync(RECORDS_REGISTRY_FILE, JSON.stringify(records, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Error saving records registry file:", err);
+  }
+}
 
 function getStoredClients(): Array<{
   id?: string;
@@ -516,6 +537,189 @@ Extrae todas las transferencias recibidas e ingresos y genera la respuesta JSON 
       return res.json({ success: true, remaining: filtered.length });
     } catch (err: any) {
       return res.status(500).json({ error: "Error eliminando factura ARCA", details: String(err) });
+    }
+  });
+
+  // ==========================================
+  // API: Records & Vouchers (Comprobantes / Movimientos)
+  // Cross-device server synchronization
+  // ==========================================
+
+  // GET: Fetch records (all or filtered by email)
+  app.get("/api/records", (req, res) => {
+    try {
+      const emailFilter = (req.query.email as string)?.trim().toLowerCase();
+      const all = getStoredRecords();
+      if (emailFilter) {
+        const filtered = all.filter(
+          (r) => r.user_email?.toLowerCase() === emailFilter
+        );
+        return res.json({ records: filtered });
+      }
+      return res.json({ records: all });
+    } catch (err: any) {
+      console.error("Error obteniendo registros:", err);
+      return res.status(500).json({ error: "Error obteniendo registros", details: String(err) });
+    }
+  });
+
+  // POST: Insert one or multiple records
+  app.post("/api/records", (req, res) => {
+    try {
+      const payload = req.body;
+      const itemsToInsert = Array.isArray(payload) ? payload : [payload];
+      const existing = getStoredRecords();
+      const now = new Date().toISOString();
+      const inserted: any[] = [];
+
+      for (const item of itemsToInsert) {
+        const cleanEmail = item.user_email?.trim().toLowerCase() || "cliente@cuentasclaras.com";
+        const recordId = item.id || item._local_id || `rec-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+        const newRecord = {
+          ...item,
+          id: recordId,
+          user_email: cleanEmail,
+          created_at: item.created_at || now,
+          facturado: item.facturado === true,
+        };
+
+        // If replacing an existing record by ID or adding fresh
+        const existingIdx = existing.findIndex((r) => r.id === recordId);
+        if (existingIdx >= 0) {
+          existing[existingIdx] = newRecord;
+        } else {
+          existing.unshift(newRecord);
+        }
+        inserted.push(newRecord);
+
+        // Auto-register / update client in clients registry
+        if (cleanEmail && cleanEmail !== "ahilindalila94@gmail.com") {
+          try {
+            const clients = getStoredClients();
+            const clientIdx = clients.findIndex((c) => c.email.toLowerCase() === cleanEmail);
+            const clientCuit = item.cuit || item.pagador_nombre_cuit || (clientIdx >= 0 ? clients[clientIdx].cuit : undefined);
+            const clientName = (clientIdx >= 0 && clients[clientIdx].nombre_comercio) ? clients[clientIdx].nombre_comercio : (item.origen_billetera ? `Cliente ${cleanEmail.split("@")[0]}` : undefined);
+
+            if (clientIdx >= 0) {
+              clients[clientIdx] = {
+                ...clients[clientIdx],
+                last_active: now,
+                cuit: clientCuit || clients[clientIdx].cuit,
+              };
+            } else {
+              clients.push({
+                id: `client-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+                email: cleanEmail,
+                nombre_comercio: clientName,
+                cuit: clientCuit,
+                role: "cliente",
+                created_at: now,
+                last_active: now,
+              });
+            }
+            persistClients(clients);
+          } catch (cErr) {
+            console.warn("Aviso auto-registrando cliente:", cErr);
+          }
+        }
+      }
+
+      persistRecords(existing);
+      console.log(`[RECORDS SYNC] ${inserted.length} registros guardados en servidor.`);
+
+      return res.json({
+        success: true,
+        inserted,
+        total: existing.length,
+      });
+    } catch (err: any) {
+      console.error("Error al guardar registros en el servidor:", err);
+      return res.status(500).json({ error: "No se pudieron guardar los registros", details: String(err) });
+    }
+  });
+
+  // PUT: Update single record
+  app.put("/api/records/:id", (req, res) => {
+    try {
+      const recordId = req.params.id;
+      const updates = req.body;
+      const existing = getStoredRecords();
+      const index = existing.findIndex((r) => r.id === recordId || r._local_id === recordId);
+
+      if (index === -1) {
+        return res.status(404).json({ error: "Registro no encontrado" });
+      }
+
+      existing[index] = {
+        ...existing[index],
+        ...updates,
+      };
+
+      persistRecords(existing);
+      return res.json({ success: true, record: existing[index] });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Error actualizando registro", details: String(err) });
+    }
+  });
+
+  // POST: Batch mark records as facturado (or update)
+  app.post("/api/records/batch-facturar", (req, res) => {
+    try {
+      const { email, ids, facturado } = req.body;
+      const existing = getStoredRecords();
+      let updatedCount = 0;
+
+      const updated = existing.map((r) => {
+        let match = false;
+        if (ids && Array.isArray(ids) && ids.includes(r.id)) {
+          match = true;
+        } else if (email && r.user_email?.toLowerCase() === String(email).trim().toLowerCase()) {
+          match = true;
+        }
+
+        if (match) {
+          updatedCount++;
+          return {
+            ...r,
+            facturado: facturado !== undefined ? Boolean(facturado) : true,
+          };
+        }
+        return r;
+      });
+
+      persistRecords(updated);
+      console.log(`[BATCH FACTURAR] ${updatedCount} registros actualizados a facturado=${facturado}`);
+
+      return res.json({ success: true, count: updatedCount });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Error en batch facturar", details: String(err) });
+    }
+  });
+
+  // DELETE: Delete single record
+  app.delete("/api/records/:id", (req, res) => {
+    try {
+      const recordId = req.params.id;
+      const existing = getStoredRecords();
+      const filtered = existing.filter((r) => r.id !== recordId && r._local_id !== recordId);
+      persistRecords(filtered);
+      return res.json({ success: true, remaining: filtered.length });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Error eliminando registro", details: String(err) });
+    }
+  });
+
+  // DELETE: Delete all records for a client
+  app.delete("/api/records/by-client/:email", (req, res) => {
+    try {
+      const targetEmail = req.params.email?.trim().toLowerCase();
+      const existing = getStoredRecords();
+      const filtered = existing.filter((r) => r.user_email?.toLowerCase() !== targetEmail);
+      persistRecords(filtered);
+      return res.json({ success: true, remaining: filtered.length });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Error eliminando registros del cliente", details: String(err) });
     }
   });
 

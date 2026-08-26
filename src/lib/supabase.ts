@@ -394,6 +394,82 @@ export const supabase = {
             }
           }
 
+          // Sync with Server API for cross-device mobile/desktop persistence
+          if (table === 'receipts' || table === 'extractos') {
+            try {
+              if (queryType === 'insert') {
+                const itemsToSave = Array.isArray(insertData) ? insertData : [insertData];
+                const res = await fetch('/api/records', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(itemsToSave),
+                });
+                if (res.ok) {
+                  const data = await res.json();
+                  const result = { data: data.inserted, error: null };
+                  if (onfulfilled) return onfulfilled(result);
+                  return result;
+                }
+              } else if (queryType === 'update') {
+                const idFilter = filters.find((f) => f.col === 'id');
+                const emailFilter = filters.find((f) => f.col === 'user_email');
+                if (idFilter) {
+                  await fetch(`/api/records/${encodeURIComponent(idFilter.val)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updateValues),
+                  });
+                } else if (emailFilter && updateValues.facturado !== undefined) {
+                  await fetch('/api/records/batch-facturar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: emailFilter.val, facturado: updateValues.facturado }),
+                  });
+                }
+                const result = { data: null, error: null };
+                if (onfulfilled) return onfulfilled(result);
+                return result;
+              } else if (queryType === 'delete') {
+                const idFilter = filters.find((f) => f.col === 'id');
+                const emailFilter = filters.find((f) => f.col === 'user_email');
+                if (idFilter) {
+                  await fetch(`/api/records/${encodeURIComponent(idFilter.val)}`, {
+                    method: 'DELETE',
+                  });
+                } else if (emailFilter) {
+                  await fetch(`/api/records/by-client/${encodeURIComponent(emailFilter.val)}`, {
+                    method: 'DELETE',
+                  });
+                }
+                const result = { data: null, error: null };
+                if (onfulfilled) return onfulfilled(result);
+                return result;
+              } else if (queryType === 'select') {
+                const emailFilter = filters.find((f) => f.col === 'user_email');
+                const url = emailFilter ? `/api/records?email=${encodeURIComponent(emailFilter.val)}` : '/api/records';
+                const res = await fetch(url);
+                if (res.ok) {
+                  const data = await res.json();
+                  let records = data.records || [];
+                  if (orderCol) {
+                    records.sort((a: any, b: any) => {
+                      const valA = a[orderCol!] || '';
+                      const valB = b[orderCol!] || '';
+                      if (valA < valB) return orderDesc ? 1 : -1;
+                      if (valA > valB) return orderDesc ? -1 : 1;
+                      return 0;
+                    });
+                  }
+                  const result = { data: records, error: null };
+                  if (onfulfilled) return onfulfilled(result);
+                  return result;
+                }
+              }
+            } catch (apiErr) {
+              console.warn('[Server Records API Note] Usando caché local offline:', apiErr);
+            }
+          }
+
           // Fallback Database logic (localStorage)
           const unsyncedStr = localStorage.getItem('local_unsynced_extractos') || '[]';
           let unsynced = JSON.parse(unsyncedStr);
